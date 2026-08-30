@@ -1,14 +1,17 @@
 /**
- * The Pro seam's free side: inert stand-ins for the classes the private `pro`
- * submodule supplies.
- *
- * A free build has no `pro` submodule, so the gate (pro.ts) keeps its committed
- * default and re-exports these. Every method is a no-op that resolves to "no
- * licence, nothing synced", which is exactly the free product. The service
- * worker constructs and calls these identically to the real classes; they simply
- * never do anything, and nothing free depends on them doing anything. The types
- * are the shared ones in pro-types.ts, so a free build and a Pro build agree on
- * every shape.
+ * ------------------------------------------------------------------
+ *  Title    |  Pro seam, free side
+ *  Ref      |  pro.ts, pro-types.ts
+ *  ID       |  Pro tier (DESIGN sec 30)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Inert stand-ins for the classes a Pro build supplies.
+ *  How      |  A free build has no pro submodule, so the gate keeps
+ *           |  its default and re-exports these. Every method is a
+ *           |  no-op that resolves to "no licence, nothing synced".
+ *  Note     |  The worker constructs and calls these exactly like the
+ *           |  real classes; shared types keep the shapes aligned.
+ *  Author   |  Ojas Kekre, 30/08/2026
+ * ------------------------------------------------------------------
  */
 
 import type {

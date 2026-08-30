@@ -1,11 +1,19 @@
 /**
- * The flush loop.
- *
- * Every Set-Cookie dirties a session. Recompiling on each one would call
- * updateSessionRules hundreds of times during a single page load, so writes
- * are coalesced. But coalescing has a hard exception: a stale rule during a
- * top level navigation is the one case that logs you out, so navigation forces
- * an immediate flush and waits for it.
+ * ------------------------------------------------------------------
+ *  Title    |  Flush loop
+ *  Ref      |  registry.ts, netfilter/compile.ts, netfilter/dnr.ts
+ *  ID       |  Netfilter flush
+ * ------------------------------------------------------------------
+ *  Purpose  |  Coalesce cookie-driven recompiles into batched rule
+ *           |  writes to the browser.
+ *  How      |  Every Set-Cookie dirties a session; recompiling on each
+ *           |  would call updateSessionRules hundreds of times per page
+ *           |  load, so writes are debounced.
+ *  Note     |  Hard exception: a stale rule during a top level
+ *           |  navigation is the one case that logs you out, so
+ *           |  navigation forces an immediate flush and waits for it.
+ *  Author   |  Ojas Kekre, 19/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { compileSession, RuleIds } from '../netfilter/compile.js';
@@ -72,12 +80,14 @@ export class Engine {
   }
 
   /**
-   * Re-dirties a session at the moment one of its rules stops being true.
-   *
-   * A rule is compiled once and then believed until something changes, which is
-   * fine for every input except time. A defaulted-Lax cookie is carried on a
-   * cross-site POST for two minutes and then must not be, and nothing else is
-   * going to happen to say so on a tab the user has left sitting there.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Re-dirty a session when one of its rules stops being
+   *           |  true on its own.
+   *  How      |  A rule is believed until something changes, which is
+   *           |  fine for every input except time. A defaulted-Lax
+   *           |  cookie is carried cross-site for two minutes then must
+   *           |  not be, and nothing else on an idle tab says so.
+   * ------------------------------------------------------------------
    */
   private expireAt(id: SessionId, at: number): void {
     const existing = this.expiries.get(id);
@@ -125,9 +135,12 @@ export class Engine {
   }
 
   /**
-   * Forces a flush and resolves once the rules are actually in the browser.
-   * Callers awaiting this before releasing a navigation are the reason the
-   * whole design does not need the reconcile fallback.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Force a flush and resolve once the rules are actually
+   *           |  in the browser.
+   *  Note     |  Callers awaiting this before releasing a navigation
+   *           |  are why the design needs no reconcile fallback.
+   * ------------------------------------------------------------------
    */
   async flush(): Promise<void> {
     if (this.timer) {
@@ -209,11 +222,13 @@ export class Engine {
   }
 
   /**
-   * Withdraws a session's rules.
-   *
-   * Chained behind any flush already running. Retiring out of band would let an
-   * in-flight compile re-add the very rules being withdrawn, leaving a deleted
-   * session still rewriting headers.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Withdraw a session's rules.
+   *  How      |  Chained behind any running flush. Retiring out of band
+   *           |  would let an in-flight compile re-add the very rules
+   *           |  being withdrawn, leaving a deleted session still
+   *           |  rewriting headers.
+   * ------------------------------------------------------------------
    */
   async retire(sessionId: SessionId): Promise<void> {
     const run = async () => {

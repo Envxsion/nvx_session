@@ -1,12 +1,18 @@
 /**
- * Sessions and their tab bindings.
- *
- * Sessions are durable; tabs are ephemeral bindings to them. That split is
- * what makes multi-window synchronisation fall out for free: a session open in
- * three windows is three tab ids in one rule's tabIds array, with no
- * per-window state to reconcile.
- *
- * Pure state, no browser APIs, so every transition below is unit testable.
+ * ------------------------------------------------------------------
+ *  Title    |  Sessions and their tab bindings
+ *  Ref      |  persist.ts, engine.ts, netfilter/compile.ts
+ *  ID       |  Kernel state
+ * ------------------------------------------------------------------
+ *  Purpose  |  The kernel's session and binding store.
+ *  How      |  Sessions are durable; tabs are ephemeral bindings. That
+ *           |  split makes multi-window sync free: a session in three
+ *           |  windows is three tab ids in one rule, no per-window
+ *           |  state to reconcile.
+ *  Note     |  Pure state, no browser APIs, so every transition is
+ *           |  unit testable.
+ *  Author   |  Ojas Kekre, 19/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { registrableDomain } from '../jar/psl.js';
@@ -16,12 +22,14 @@ import type { Danger } from '../guard/policy.js';
 export type SessionId = string;
 
 /**
- * The holding pen a tab waits in while the user decides which account it is.
- *
- * Named here rather than only in the worker because persistence has to know it:
- * it is the one session whose jar must never be written out, and the __nvx
- * prefix alone is too broad a test, since every internal suite names its
- * throwaway sessions from the same reserved namespace.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The holding pen a tab waits in while the user decides
+ *           |  which account it is.
+ *  Note     |  Named here, not only in the worker, because persistence
+ *           |  must know the one session whose jar is never written
+ *           |  out; the __nvx prefix alone is too broad, since every
+ *           |  internal suite names throwaways from that namespace.
+ * ------------------------------------------------------------------
  */
 export const ANON_SESSION_ID = '__nvx_anonymous';
 
@@ -310,9 +318,12 @@ export class Registry {
   // ------------------------------------------------------------ resolution
 
   /**
-   * Which session a brand new tab should join. Opener inheritance wins over
-   * pinning, because a tab opened from a managed tab is continuing that
-   * session's work regardless of where it points.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Which session a brand new tab should join.
+   *  Note     |  Opener inheritance wins over pinning: a tab opened
+   *           |  from a managed tab is continuing that session's work
+   *           |  regardless of where it points.
+   * ------------------------------------------------------------------
    */
   resolveForNewTab(opts: { openerTabId?: number; url?: string }): SessionId | null {
     if (opts.openerTabId !== undefined) {
@@ -337,16 +348,19 @@ export class Registry {
   // -------------------------------------------------- service worker policy
 
   /**
-   * Confirmed by the M0 probe: a tabIds [-1] rule matches worker traffic. But
-   * a worker is shared across every tab on its origin whatever session each tab
-   * belongs to, so ownership is only unambiguous while one session has tabs
-   * there. Contested is reported rather than resolved, so the caller can
-   * suppress instead of silently feeding one session's jar to another's pages.
-   *
-   * Keyed by origin. An earlier version keyed by registrable domain, which
-   * over-suppressed badly on exactly the sites this exists for: a session on
-   * `github.com` and another on `gist.github.com` are on two different workers,
-   * and treating them as one contest disabled worker attribution for both.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Resolve which session, if any, owns an origin's
+   *           |  service worker.
+   *  How      |  A tabIds [-1] rule matches worker traffic (M0 probe),
+   *           |  but a worker is shared across every tab on its origin,
+   *           |  so ownership is unambiguous only while one session has
+   *           |  tabs there. Contest is reported, not resolved, so the
+   *           |  caller can suppress rather than cross-feed jars.
+   *  Bug-Fix  |  Keyed by origin. Keying by registrable domain over-
+   *           |  suppressed on the target sites: github.com and
+   *           |  gist.github.com are different workers, and treating
+   *           |  them as one contest disabled attribution for both.
+   * ------------------------------------------------------------------
    */
   serviceWorkerPolicy(url: string): ServiceWorkerPolicy {
     const target = originOf(url);
@@ -375,10 +389,12 @@ export class Registry {
   }
 
   /**
-   * Hostnames this session's tabs are currently on.
-   *
-   * The compiler needs these, not just the hosts the jar already knows, or a
-   * new session's first navigation has no rule and inherits the profile jar.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Hostnames this session's tabs are currently on.
+   *  Note     |  The compiler needs these, not just the hosts the jar
+   *           |  knows, or a new session's first navigation has no rule
+   *           |  and inherits the profile jar.
+   * ------------------------------------------------------------------
    */
   hostsFor(sessionId: SessionId): string[] {
     const out = new Set<string>();
@@ -391,10 +407,13 @@ export class Registry {
   }
 
   /**
-   * Sessions holding cookies for a domain. This is what makes an identity
-   * chooser possible: when more than one session can sign in somewhere, the
-   * choice belongs to the user rather than to whichever jar happened to be
-   * consulted first.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Sessions holding cookies for a domain.
+   *  Note     |  What makes an identity chooser possible: when more
+   *           |  than one session can sign in somewhere, the choice
+   *           |  belongs to the user, not to whichever jar was
+   *           |  consulted first.
+   * ------------------------------------------------------------------
    */
   sessionsWithIdentityFor(domain: string): SessionId[] {
     const target = registrableDomain(domain);
@@ -404,16 +423,17 @@ export class Registry {
   }
 
   /**
-   * Sessions a tab on this domain could belong to: one holding an identity
-   * here, or one pinning the domain and holding nothing yet.
-   *
-   * The second half is what makes a second account reachable. A session created
-   * to sign in as somebody else is empty by definition, so a chooser built only
-   * from sessionsWithIdentityFor cannot offer it, and the user is left picking
-   * the account they were trying to get away from.
-   *
-   * Identity-bearing sessions come first, since resuming is the more common
-   * answer, but an empty pinned session is always in the list.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Sessions a tab on this domain could belong to: one
+   *           |  holding an identity here, or one pinning it and empty.
+   *  Note     |  The empty-pinned half is what makes a second account
+   *           |  reachable: a session created to sign in as someone
+   *           |  else is empty by definition, so an identity-only
+   *           |  chooser leaves the user picking the account they were
+   *           |  trying to get away from.
+   *  Flow     |  Identity-bearing first (resuming is commoner), but an
+   *           |  empty pinned session is always in the list.
+   * ------------------------------------------------------------------
    */
   sessionsCovering(domain: string): SessionId[] {
     const target = registrableDomain(domain);
@@ -435,8 +455,12 @@ export class Registry {
   }
 
   /**
-   * Records that this session has signed in somewhere, returning whether that
-   * was news. The caller decides whether news is worth telling the user about.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Record that this session has signed in somewhere,
+   *           |  returning whether that was news.
+   *  Note     |  The caller decides whether news is worth telling the
+   *           |  user about.
+   * ------------------------------------------------------------------
    */
   noteFamily(sessionId: SessionId, urlOrDomain: string): boolean {
     const session = this.sessions.get(sessionId);
@@ -496,10 +520,13 @@ export function hostOf(url: string): string {
 }
 
 /**
- * Scheme and host, which is the unit a service worker registration is scoped
- * to. The port is deliberately kept: `http://localhost:8787` and
- * `http://localhost:3000` are different origins and different workers, and the
- * fixture depends on that being true.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Scheme and host, the unit a service worker registration
+ *           |  is scoped to.
+ *  Note     |  The port is kept: localhost:8787 and localhost:3000 are
+ *           |  different origins and workers, and the fixture depends
+ *           |  on that.
+ * ------------------------------------------------------------------
  */
 export function originOf(url: string): string {
   try {

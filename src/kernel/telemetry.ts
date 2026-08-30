@@ -1,32 +1,22 @@
 /**
- * Anonymous usage counts, built so the product cannot leak what it exists to
- * protect.
- *
- * The whole design follows from one fact about extensions: a published build is
- * a zip anyone can unpack and read, so any credential shipped in it is public.
- * There is therefore no database key here and there never can be. This module
- * knows one thing, an endpoint URL, and that endpoint is a thin ingest function
- * the author runs which holds the real credentials on its own server. The
- * extension only ever POSTs to it. See TELEMETRY.md for the endpoint's contract.
- *
- * Two independent switches gate every send, and both must be on:
- *
- *   - consent. Off unless the user turned it on. For a product whose promise is
- *     that your data does not leave, opt-in is the only honest default.
- *   - a configured endpoint. Absent in every build except the store build,
- *     where it is injected at package time from an environment variable, so a
- *     developer running an unpacked build sends nothing and needs no server.
- *
- * And what can ever be sent is an allowlist, not a blocklist. Every event is
- * built by a typed method below out of a fixed set of primitive fields: a
- * version, a bucketed count, a value from a closed enum, a boolean, a sanitised
- * slug. There is deliberately no method that accepts a free-form string, so a
- * URL, a domain, a cookie or an account label has no path into a payload even
- * by mistake. That is the guarantee the tests pin.
- *
- * Nothing here can fail the product. Every network path swallows its own error
- * and drops the batch, because a telemetry outage must never be something the
- * user feels.
+ * ------------------------------------------------------------------
+ *  Title    |  Anonymous usage counts
+ *  Ref      |  persist.ts, TELEMETRY.md
+ *  ID       |  Telemetry
+ * ------------------------------------------------------------------
+ *  Purpose  |  Opt-in, coarse usage counts, built so the product
+ *           |  cannot leak what it exists to protect. No personal data.
+ *  Guards   |  Two switches gate every send, both must be on: user
+ *           |  consent (off by default), and a configured endpoint
+ *           |  (absent outside the store build). What can be sent is an
+ *           |  allowlist: bucketed counts, closed enums, booleans,
+ *           |  sanitised slugs. No method takes a free-form string, so
+ *           |  a URL, domain, cookie or label has no path into a
+ *           |  payload. The tests pin that.
+ *  Note     |  Nothing here can fail the product: every network path
+ *           |  swallows its error and drops the batch.
+ *  Author   |  Ojas Kekre, 24/08/2026
+ * ------------------------------------------------------------------
  */
 
 import type { StorageArea } from './persist.js';
@@ -35,18 +25,21 @@ import type { StorageArea } from './persist.js';
 export const TELEMETRY_ID_KEY = 'nvx.telemetry.id';
 
 /**
- * The wire-format version, sent on every batch as `schema`.
- *
- * Bumped only when the shape of an envelope changes, so the endpoint can accept
- * more than one version during a rollout and reject a shape it does not know
- * rather than guess. The event and field allowlists can grow without a bump; a
- * bump is for a change to the envelope itself.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The wire-format version, sent on every batch.
+ *  Note     |  Bumped only when the envelope shape changes, so a
+ *           |  rollout can accept more than one version. The event and
+ *           |  field allowlists can grow without a bump.
+ * ------------------------------------------------------------------
  */
 export const TELEMETRY_SCHEMA = 2;
 
 /**
- * The closed set of events. Anything not here cannot be sent, because there is
- * no method to send it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The closed set of events.
+ *  Note     |  Anything not here cannot be sent, because there is no
+ *           |  method to send it.
+ * ------------------------------------------------------------------
  */
 export type TelemetryEvent =
   | 'install'
@@ -59,18 +52,15 @@ export type TelemetryEvent =
   | 'error';
 
 /**
- * The device profile, sent with install, update, startup and the daily active
- * beat so the operator can see the shape of the audience without seeing a
- * person in it.
- *
- * Every field is deliberately coarse. The point is to know "how many people on
- * macOS arm64 running Opera", not to build something that narrows to one
- * browser. So the operating system, architecture and browser are closed enums;
- * the browser version is the major number only; the language is the primary
- * subtag with no region; and the timezone is a whole-hour offset, not a named
- * zone or a location. None of it is a fingerprinting vector the way a screen
- * size, a canvas hash or a font list would be, and none of those is collected,
- * because the product exists to defeat exactly that.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The device profile, sent so the operator sees the shape
+ *           |  of the audience without seeing a person in it.
+ *  Note     |  Every field is deliberately coarse: OS, arch and browser
+ *           |  are closed enums; the browser version is the major only;
+ *           |  the language is the primary subtag; the timezone is a
+ *           |  whole-hour offset. None is a fingerprinting vector, and
+ *           |  no screen size, canvas hash or font list is collected.
+ * ------------------------------------------------------------------
  */
 export type TelemetryOS = 'windows' | 'macos' | 'linux' | 'chromeos' | 'android' | 'other';
 export type TelemetryArch = 'x86-64' | 'arm64' | 'x86-32' | 'other';
@@ -106,8 +96,12 @@ export interface TelemetryUsage {
 }
 
 /**
- * The closed set of features a `feature_used` event may name. A fixed enum
- * rather than a string, so the field can never carry anything but one of these.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The closed set of features a feature_used event may
+ *           |  name.
+ *  Note     |  A fixed enum, not a string, so the field can never
+ *           |  carry anything but one of these.
+ * ------------------------------------------------------------------
  */
 export type TelemetryFeature =
   | 'bulk_move'
@@ -119,14 +113,15 @@ export type TelemetryFeature =
   | 'pause';
 
 /**
- * The closed set of error categories.
- *
- * Closed on purpose, and this is the load-bearing decision for the no-leak
- * promise. An error is the one thing tempting to describe in free text, and
- * free text is exactly where a URL or a cookie would ride out. So there is no
- * free-text path: a caller can only name one of these, which say what broke
- * without saying anything about the user. `slug` still runs over the value as a
- * backstop, but the type is what makes a leak impossible rather than unlikely.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The closed set of error categories.
+ *  Note     |  Closed on purpose, the load-bearing decision for the
+ *           |  no-leak promise: an error is the one thing tempting to
+ *           |  describe in free text, and free text is where a URL or
+ *           |  cookie rides out. A caller can only name one of these.
+ *           |  slug runs as a backstop, but the type is what makes a
+ *           |  leak impossible rather than unlikely.
+ * ------------------------------------------------------------------
  */
 export type TelemetryError =
   | 'boot_failed'
@@ -166,8 +161,11 @@ export interface TelemetryEnvelope {
 }
 
 /**
- * Everything this module needs from the outside, injected so it holds no
- * reference to `chrome` and runs unchanged under a test.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Everything this module needs from the outside, injected.
+ *  Note     |  Holds no reference to chrome, so it runs unchanged
+ *           |  under a test.
+ * ------------------------------------------------------------------
  */
 export interface TelemetryPorts {
   storage: StorageArea;
@@ -183,11 +181,11 @@ export interface TelemetryPorts {
 }
 
 /**
- * Buckets a raw count into a coarse range.
- *
- * The exact number of sessions somebody runs is more than telemetry needs and
- * edges toward a fingerprint, so it is never sent; the bucket is. The ranges
- * are wide on purpose.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Bucket a raw count into a coarse range.
+ *  Note     |  The exact count edges toward a fingerprint, so it is
+ *           |  never sent; the bucket is. Ranges are wide on purpose.
+ * ------------------------------------------------------------------
  */
 export function bucket(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '0';
@@ -199,13 +197,14 @@ export function bucket(n: number): string {
 }
 
 /**
- * Reduces an error label to a bare slug.
- *
- * The one place a caller passes text, and so the one place text is scrubbed:
- * lowercased, everything but letters, digits and underscores dropped, and
- * truncated hard. A URL, a stack line or a message handed in here comes out as
- * a short slug with the punctuation that made it identifying removed, so even a
- * careless caller cannot turn an error into a leak.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Reduce an error label to a bare slug.
+ *  Note     |  The one place a caller passes text, so the one place
+ *           |  text is scrubbed: lowercased, non-alphanumerics dropped,
+ *           |  truncated hard. A URL or stack line comes out with the
+ *           |  identifying punctuation removed, so even a careless
+ *           |  caller cannot turn an error into a leak.
+ * ------------------------------------------------------------------
  */
 export function slug(raw: string): string {
   return String(raw)
@@ -216,11 +215,12 @@ export function slug(raw: string): string {
 }
 
 /**
- * Buckets days-since-install into retention cohorts.
- *
- * The exact age of an install edges toward a timestamp, so it is never sent;
- * the cohort is. Wide bands, chosen so day one, the first week, the first
- * month and beyond each fall out on their own.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Bucket days-since-install into retention cohorts.
+ *  Note     |  The exact age edges toward a timestamp, so it is never
+ *           |  sent; the cohort is. Wide bands, so day one, the first
+ *           |  week, the first month and beyond each fall out.
+ * ------------------------------------------------------------------
  */
 export function daysBucket(days: number): string {
   if (!Number.isFinite(days) || days <= 0) return '0';
@@ -244,14 +244,15 @@ const BROWSER_SET = new Set<TelemetryBrowser>([
 ]);
 
 /**
- * Forces an env object onto the allowlist, whatever it was handed.
- *
- * Every field is coerced to its closed set or coarsened: an unknown OS, arch or
- * browser becomes `other`; a version becomes a non-negative integer; a language
- * that is not a bare two or three letter subtag becomes `other`, which also
- * strips any region a caller left on; and the timezone is rounded to a whole
- * hour and clamped to the real range. So even a caller that fabricates an env
- * cannot push anything identifying through it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Force an env object onto the allowlist, whatever it was
+ *           |  handed.
+ *  Note     |  Every field is coerced to its closed set or coarsened:
+ *           |  unknown OS/arch/browser become other; version a non-neg
+ *           |  integer; a non-subtag language becomes other (stripping
+ *           |  any region); timezone rounded to a whole hour and
+ *           |  clamped. A fabricated env cannot push anything through.
+ * ------------------------------------------------------------------
  */
 export function cleanEnv(raw: Partial<TelemetryEnv>): TelemetryEnv {
   const lang = String(raw.lang ?? '').toLowerCase();
@@ -287,9 +288,12 @@ export class Telemetry {
   }
 
   /**
-   * Loads the install id, minting one on first use. Cheap to call repeatedly;
-   * it does its work once. Never runs while telemetry is off, so a profile that
-   * never consents never gets an id written at all.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Load the install id, minting one on first use.
+   *  Note     |  Cheap to call repeatedly; does its work once. Never
+   *           |  runs while telemetry is off, so a profile that never
+   *           |  consents never gets an id written at all.
+   * ------------------------------------------------------------------
    */
   async ready(): Promise<void> {
     if (this.id || !this.live()) return;
@@ -320,8 +324,11 @@ export class Telemetry {
   }
 
   /**
-   * Records the device profile, cleaned onto the allowlist, so the lifecycle
-   * events that follow can carry it. Set once at boot; cheap to set again.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Record the device profile, cleaned onto the allowlist,
+   *           |  so the lifecycle events that follow can carry it.
+   *  Note     |  Set once at boot; cheap to set again.
+   * ------------------------------------------------------------------
    */
   setEnv(env: Partial<TelemetryEnv>): void {
     this.env = cleanEnv(env);
@@ -345,11 +352,13 @@ export class Telemetry {
   }
 
   /**
-   * The once-a-day heartbeat. Carries the device profile plus the engagement
-   * and retention buckets, and is what turns a pile of installs into a picture
-   * of who keeps using it. The caller fires it at most once per day; nothing
-   * here enforces that, because "once a day" is a property of when it is called,
-   * not of the payload.
+   * ------------------------------------------------------------------
+   *  Purpose  |  The once-a-day heartbeat: device profile plus the
+   *           |  engagement and retention buckets.
+   *  Note     |  The caller fires it at most once per day; nothing here
+   *           |  enforces that, since "once a day" is a property of when
+   *           |  it is called, not of the payload.
+   * ------------------------------------------------------------------
    */
   active(usage: TelemetryUsage): void {
     this.enqueue('active', {
@@ -374,17 +383,23 @@ export class Telemetry {
   }
 
   /**
-   * `category` is a value from a closed set, so nothing about the error but its
-   * kind can be sent. `slug` runs anyway as a backstop against a caller who
-   * casts around the type.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Record an error by category.
+   *  Note     |  category is from a closed set, so nothing but the kind
+   *           |  can be sent. slug runs anyway, a backstop against a
+   *           |  caller who casts around the type.
+   * ------------------------------------------------------------------
    */
   error(category: TelemetryError): void {
     this.enqueue('error', { category: slug(category) });
   }
 
   /**
-   * Sends whatever is queued, in one request. Silent on every failure, and a
-   * no-op when either switch is off, so a caller can flush freely.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Send whatever is queued, in one request.
+   *  Note     |  Silent on every failure, and a no-op when either
+   *           |  switch is off, so a caller can flush freely.
+   * ------------------------------------------------------------------
    */
   async flush(): Promise<void> {
     const url = this.ports.endpoint();
@@ -398,9 +413,12 @@ export class Telemetry {
   }
 
   /**
-   * Forgets everything, for when consent is withdrawn: the queue is dropped and
-   * the install id is erased, so turning telemetry off also removes the only
-   * durable thing it ever wrote.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Forget everything, for when consent is withdrawn.
+   *  Note     |  The queue is dropped and the install id erased, so
+   *           |  turning telemetry off also removes the only durable
+   *           |  thing it ever wrote.
+   * ------------------------------------------------------------------
    */
   async purge(): Promise<void> {
     this.queue = [];

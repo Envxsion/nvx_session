@@ -1,12 +1,18 @@
 /**
- * The Pro gate. The service worker imports License and Sync from here and
- * nowhere else.
- *
- * The committed default re-exports the free stub, so the public repository
- * builds and runs as the free product with no `pro` submodule present. A Pro
- * build points this at ../pro/index.js at package time (see tools/build.mjs),
- * which swaps in the real classes from the private submodule. Types come from
- * pro-types.js in both cases, so the two sides cannot drift.
+ * ------------------------------------------------------------------
+ *  Title    |  Pro seam
+ *  Ref      |  pro.free.ts, pro-types.ts, tools/build.mjs
+ *  ID       |  Pro tier (DESIGN sec 30)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The one import point for License and Sync.
+ *  How      |  The committed default re-exports the free stub, so the
+ *           |  public tree builds and runs as the free product. A Pro
+ *           |  build repoints this at the private submodule at package
+ *           |  time.
+ *  Note     |  Types come from pro-types.js either way, so the two
+ *           |  sides cannot drift.
+ *  Author   |  Ojas Kekre, 30/08/2026
+ * ------------------------------------------------------------------
  */
 
 export * from './pro.free.js';

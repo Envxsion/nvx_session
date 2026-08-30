@@ -1,9 +1,16 @@
 /**
- * Write-through persistence.
- *
- * The MV3 service worker is terminated after roughly thirty seconds idle, so
- * the kernel holds cache and storage holds truth. Every mutation lands before
- * it is acknowledged, and a cold wake rehydrates rather than rebuilding.
+ * ------------------------------------------------------------------
+ *  Title    |  Write-through persistence
+ *  Ref      |  registry.ts, journal.ts, jar/store.ts
+ *  ID       |  Persistence
+ * ------------------------------------------------------------------
+ *  Purpose  |  Persist sessions, jars and settings so a cold worker
+ *           |  wake rehydrates rather than rebuilds.
+ *  How      |  The MV3 worker is killed after ~30s idle, so the kernel
+ *           |  holds cache and storage holds truth. Every mutation
+ *           |  lands before it is acknowledged.
+ *  Author   |  Ojas Kekre, 25/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { LEVELS, type Level } from './journal.js';
@@ -32,9 +39,12 @@ export interface PersistedSession {
 }
 
 /**
- * Identity channels are a preference, not per-session state, so they live
- * beside the sessions rather than inside them. Absent in state written by an
- * earlier build, which is why every reader goes through withDefaults.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Profile-scope preferences, kept beside the sessions
+ *           |  rather than inside them.
+ *  Note     |  Absent in state written by an earlier build, which is
+ *           |  why every reader goes through withDefaults.
+ * ------------------------------------------------------------------
  */
 export interface Settings {
   /** Stamp the session mark onto the favicon of every managed tab. */
@@ -243,9 +253,12 @@ export interface StorageArea {
 
 const KEY = 'nvx.state.v1';
 /**
- * The previous good state, kept so a corrupt or truncated write is survivable.
- * Losing the jar means losing every signed-in session at once, which is the
- * worst non-security outcome this project has, and it would happen silently.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The previous good state, kept so a corrupt or truncated
+ *           |  write is survivable.
+ *  Note     |  Losing the jar loses every signed-in session at once,
+ *           |  the worst non-security outcome here, and silently.
+ * ------------------------------------------------------------------
  */
 const BACKUP = 'nvx.state.backup';
 
@@ -282,11 +295,12 @@ export function serialise(
 }
 
 /**
- * Structural validation before anything is trusted.
- *
- * A crash can leave state written by an older build, or a shape nobody
- * anticipated. Throwing here would discard every session; skipping a bad entry
- * keeps the rest.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Structural validation before anything is trusted.
+ *  Note     |  A crash can leave state from an older build or an
+ *           |  unanticipated shape. Throwing would discard every
+ *           |  session; skipping a bad entry keeps the rest.
+ * ------------------------------------------------------------------
  */
 export function looksValid(state: unknown): state is PersistedState {
   if (!state || typeof state !== 'object') return false;
@@ -322,14 +336,17 @@ export function deserialise(state: PersistedState): Registry {
 
   for (const p of state.sessions.filter(validSession)) {
     /**
-     * Derived here rather than trusted from the snapshot, because a restore is
-     * exactly where the flag went missing: a pen that comes back without it
-     * counts as a real account again, offers itself in the picker, and keeps
-     * whatever a waiting tab was handed.
-     *
-     * The exact id, not the reserved prefix. Every internal suite names its
-     * throwaway sessions from that namespace too, and emptying their jars on
-     * restore is precisely what a restore test exists to catch.
+     * ------------------------------------------------------------------
+     *  Purpose  |  Derive the ephemeral flag here rather than trust the
+     *           |  snapshot: a restore is where the flag went missing,
+     *           |  and a pen that returns without it becomes a real
+     *           |  account, offers itself in the picker, and keeps what
+     *           |  a waiting tab was handed.
+     *  Note     |  Matches the exact id, not the reserved prefix: every
+     *           |  internal suite names throwaways from that namespace,
+     *           |  and emptying their jars on restore is what a restore
+     *           |  test exists to catch.
+     * ------------------------------------------------------------------
      */
     const ephemeral = p.id === ANON_SESSION_ID;
     const session: Session = {
@@ -380,9 +397,12 @@ export function deserialise(state: PersistedState): Registry {
 }
 
 /**
- * Coalesces writes. A page load can produce dozens of cookie changes and each
- * one dirties the whole state blob; writing per change would turn a page load
- * into dozens of serialisations of the entire jar.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Coalesce writes.
+ *  How      |  A page load can produce dozens of cookie changes, each
+ *           |  dirtying the whole state blob; writing per change would
+ *           |  serialise the entire jar dozens of times per load.
+ * ------------------------------------------------------------------
  */
 export class Persistence {
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -442,9 +462,12 @@ export class Persistence {
   }
 
   /**
-   * Loads state, falling back to the backup when the primary is unusable.
-   * Returns which copy was used so a crash recovery is visible rather than
-   * silent.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Load state, falling back to the backup when the
+   *           |  primary is unusable.
+   *  Note     |  Returns which copy was used, so a crash recovery is
+   *           |  visible rather than silent.
+   * ------------------------------------------------------------------
    */
   static async load(
     area: StorageArea
@@ -482,11 +505,13 @@ export class Persistence {
 }
 
 /**
- * Reconciles restored bindings against the tabs that actually exist.
- *
- * A binding for a tab that has since closed must go, or it keeps a dead tab id
- * in a live rule. A binding for a tab that merely navigated must stay, however
- * far it travelled.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Reconcile restored bindings against the tabs that
+ *           |  actually exist.
+ *  Note     |  A binding for a closed tab must go, or it keeps a dead
+ *           |  tab id in a live rule. One for a tab that merely
+ *           |  navigated must stay, however far it travelled.
+ * ------------------------------------------------------------------
  */
 export interface LiveTab {
   id?: number | undefined;

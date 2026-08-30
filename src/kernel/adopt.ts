@@ -1,13 +1,18 @@
 /**
- * Adopting what is already signed in.
- *
- * Setting this up by signing in again, everywhere, is the reason people abandon
- * session managers on the first evening. The profile jar already holds every
- * account the browser is carrying, and it is readable, so the first run can
- * offer those back as sessions rather than asking for them.
- *
- * Adoption copies. It never clears the profile jar, so an unmanaged tab keeps
- * working exactly as it did and a mistake costs nothing but a deleted session.
+ * ------------------------------------------------------------------
+ *  Title    |  Adopting what is already signed in
+ *  Ref      |  identity.ts, jar/cookie.ts, jar/psl.ts, netfilter/compile.ts
+ *  ID       |  M4 (adoption)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Offer the profile's existing logins back as sessions on
+ *           |  first run, instead of asking the user to sign in again.
+ *  How      |  The profile jar already holds every account the browser
+ *           |  carries, and it is readable.
+ *  Note     |  Adoption copies. It never clears the profile jar, so an
+ *           |  unmanaged tab keeps working and a mistake costs only a
+ *           |  deleted session.
+ *  Author   |  Ojas Kekre, 19/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { byteLength, hasIllegalOctet, type Cookie, type SameSite } from '../jar/cookie.js';
@@ -45,9 +50,14 @@ function sameSiteOf(raw: string | undefined, secure: boolean): SameSite {
 }
 
 /**
- * The browser reports a domain-scoped cookie with a leading dot and a host-only
- * cookie without one, but also reports hostOnly directly. The flag is
- * authoritative; the dot is presentation.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Convert a browser cookie to the jar's shape, or null if
+ *           |  it fails the same checks the parser applies.
+ *  Note     |  The browser marks a domain-scoped cookie with a leading
+ *           |  dot and a host-only one without, but also reports
+ *           |  hostOnly directly. The flag is authoritative; the dot
+ *           |  is presentation.
+ * ------------------------------------------------------------------
  */
 export function fromBrowserCookie(c: BrowserCookie, now = Date.now()): Cookie | null {
   const name = c.name?.trim();
@@ -112,11 +122,13 @@ export function fromBrowserCookie(c: BrowserCookie, now = Date.now()): Cookie | 
 }
 
 /**
- * Names that carry a session rather than a preference.
- *
- * This is a ranking hint for the list order, not a filter. Adoption always
- * copies every cookie on a chosen domain, because guessing which ones matter is
- * how you adopt a login that then fails on its first CSRF check.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Names that carry a session rather than a preference.
+ *  Note     |  A ranking hint for list order, not a filter. Adoption
+ *           |  always copies every cookie on a chosen domain, because
+ *           |  guessing which ones matter is how you adopt a login that
+ *           |  fails on its first CSRF check.
+ * ------------------------------------------------------------------
  */
 const AUTH_NAME = /sess|sid$|^sid|token|auth|login|logged|identity|account|credential|jwt|oauth|sso/i;
 /** Names that look like auth but are set for everyone, signed in or not. */
@@ -185,18 +197,17 @@ export function candidatesFrom(
 }
 
 /**
- * Below this, a session cookie is too short-lived to be a login.
- *
- * Every server framework hands an anonymous visitor a session cookie on their
- * first page, and from the outside it is indistinguishable from a real one:
- * same name, same httpOnly, same opacity. What does separate them is how long
- * it is meant to last. Being signed in is a thing a site intends to remember;
- * an anonymous session is scaffolding for the current visit and is issued for
- * minutes.
- *
- * Reported by the user before it was measured: a site they had only read a few
- * pages of was offered as an account, and the thing they noticed was that it
- * expired within the hour.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Below this, a session cookie is too short-lived to be a
+ *           |  login.
+ *  Note     |  An anonymous first-visit cookie is indistinguishable
+ *           |  from a real one by name, httpOnly or opacity; what
+ *           |  separates them is how long it is meant to last. Being
+ *           |  signed in is a thing a site intends to remember.
+ *  Bug-Fix  |  Reported before it was measured: a site the user had
+ *           |  only read was offered as an account, and expired within
+ *           |  the hour.
+ * ------------------------------------------------------------------
  */
 const LOGIN_HORIZON_MS = 6 * 60 * 60 * 1000;
 
@@ -212,14 +223,14 @@ function scoreDomain(
   if (identity) score += 6;
 
   /**
-   * A tab being open is deliberately worth nothing here.
-   *
-   * It used to be worth three, which was enough on its own to carry a domain
-   * with one anonymous session cookie over the line and label it as an account.
-   * That is the wrong kind of evidence for the question: an open tab says where
-   * somebody is looking, not who they are, and a site you have merely been
-   * reading is exactly the case that has a tab open. It still ranks, in
-   * `candidatesFrom` and in the group sort, which is where it belongs.
+   * ------------------------------------------------------------------
+   *  Purpose  |  A tab being open is deliberately worth nothing to the
+   *           |  score.
+   *  Bug-Fix  |  It used to be worth three, enough to carry a domain
+   *           |  with one anonymous cookie over the line. An open tab
+   *           |  says where somebody is looking, not who they are. It
+   *           |  still ranks, in candidatesFrom and the group sort.
+   * ------------------------------------------------------------------
    */
   void open;
 
@@ -247,17 +258,16 @@ function scoreDomain(
   score += Math.min(durable, 3) * 2;
 
   /**
-   * One weak signal is not a login.
-   *
-   * A single auth-named cookie scores two on its own and one opaque httpOnly
-   * value another, and together they used to clear the bar with an open tab's
-   * three on top. But one cookie called `session`, opaque, httpOnly, expiring
-   * within the hour and naming nobody, is the single most common thing in any
-   * jar: it is what an anonymous visit leaves behind. Alone it is not evidence.
-   *
-   * Narrow on purpose. A second auth cookie, a second opaque value, anything
-   * durable or any readable name lifts it straight back out, so this only ever
-   * catches the case where there was exactly one thing to go on.
+   * ------------------------------------------------------------------
+   *  Purpose  |  One weak signal is not a login.
+   *  Note     |  A single opaque httpOnly cookie called "session",
+   *           |  expiring within the hour and naming nobody, is the
+   *           |  commonest thing in any jar: what an anonymous visit
+   *           |  leaves behind. Alone it is not evidence.
+   *  Note     |  Narrow on purpose. A second auth cookie, a second
+   *           |  opaque value, anything durable or a readable name
+   *           |  lifts it straight back out.
+   * ------------------------------------------------------------------
    */
   const thin = authNames <= 1 && opaque <= 1 && durable === 0;
   if (!identity && thin) score = Math.min(score, SIGNED_IN_SCORE - 1);
@@ -265,15 +275,15 @@ function scoreDomain(
 }
 
 /**
- * When the thing that identifies you stops being valid, or null when nothing
- * here identifies you.
- *
- * Guarded on the identity rather than reading any token in the jar. Plenty of
- * cookies are JWTs without being logins: a signed consent record, an anonymous
- * analytics token, a CSRF token some frameworks issue as one. Reading their
- * `exp` and presenting it as when your account expires attaches an alarming and
- * meaningless clock to a site you have never signed into, which is exactly what
- * was reported.
+ * ------------------------------------------------------------------
+ *  Purpose  |  When the thing that identifies you stops being valid,
+ *           |  or null when nothing here identifies you.
+ *  Bug-Fix  |  Guarded on the identity, not any token in the jar.
+ *           |  Plenty of cookies are JWTs without being logins (consent
+ *           |  records, analytics, CSRF); reading their exp and showing
+ *           |  it as an account expiry put an alarming, meaningless
+ *           |  clock on a site never signed into, as was reported.
+ * ------------------------------------------------------------------
  */
 function identityExpiry(cookies: Cookie[], identity: Identity | null): number | null {
   if (!identity) return null;
@@ -295,9 +305,12 @@ export function looksSignedIn(c: AdoptionCandidate): boolean {
 }
 
 /**
- * A name for the session this candidate would become. The account the token
- * names beats the domain, because "you@monash.edu" is the thing being chosen
- * between and "monash.edu" is not.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A name for the session this candidate would become.
+ *  Note     |  The account the token names beats the domain: the
+ *           |  address is the thing being chosen between, the domain
+ *           |  is not.
+ * ------------------------------------------------------------------
  */
 export function proposedLabel(c: AdoptionCandidate): string {
   if (c.identity) return c.identity.label;
@@ -305,17 +318,17 @@ export function proposedLabel(c: AdoptionCandidate): string {
 }
 
 /**
- * Rules a selection would compile to.
- *
- * Four per host and four per registrable domain fallback, plus the catch-all.
- * Four rather than three because a top level navigation compiles to two rules,
- * split on whether the method is safe. Selecting half a profile would silently
- * overflow the per-session budget and drop hosts, so the count is surfaced
- * before the session is created rather than reported as a warning afterwards.
- *
- * This has to track the compiler exactly. An estimate that runs low is worse
- * than no estimate: it tells the user their selection fits and then drops the
- * hosts that did not.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rules a selection would compile to.
+ *  How      |  Four per host and four per registrable-domain fallback,
+ *           |  plus the catch-all. Four not three because a top level
+ *           |  navigation compiles to two rules, split on method
+ *           |  safety. Surfaced before the session is created, not
+ *           |  warned about after.
+ *  Note     |  Must track the compiler exactly: an estimate that runs
+ *           |  low tells the user their selection fits, then drops the
+ *           |  hosts that did not.
+ * ------------------------------------------------------------------
  */
 export function estimateRules(candidates: AdoptionCandidate[]): number {
   const hosts = new Set<string>();
@@ -332,26 +345,19 @@ export function fitsBudget(candidates: AdoptionCandidate[]): boolean {
 }
 
 /**
- * One account, however many sites it signs into.
- *
- * The candidate list is per registrable domain, because that is the unit the
- * jar and the rule compiler work in. It is not the unit a person thinks in. A
- * profile signed into one university account holds cookies for the portal, the
- * identity provider and the learning system, and offering those as three
- * sessions asks the user to know which three things are the same thing, which is
- * exactly the knowledge this feature exists to save them.
- *
- * So candidates whose readable identity is the same string become one proposal.
- * The identity comes from a token in the jar that literally says who you are, so
- * two domains sharing one is close to proof rather than a heuristic: it means
- * the same account name is signed in at both.
- *
- * Everything else stays on its own. Grouping by anything weaker, shared parent
- * domain or proximity in time, would silently merge two accounts into one
- * session, and a session holding two accounts is the failure this whole product
- * is about. When in doubt the answer is more proposals, not fewer: splitting one
- * account across two sessions is an inconvenience the user can fix in the panel,
- * and merging two accounts into one is a sign-in as the wrong person.
+ * ------------------------------------------------------------------
+ *  Purpose  |  One account, however many sites it signs into.
+ *  How      |  Candidates are per registrable domain, the unit the jar
+ *           |  and compiler work in, not the unit a person thinks in.
+ *           |  Candidates whose readable identity is the same string
+ *           |  become one proposal; a shared identity token is close to
+ *           |  proof the same account is signed in at both.
+ *  Note     |  Everything else stays on its own. Grouping by anything
+ *           |  weaker would merge two accounts into one session, the
+ *           |  failure this product is about. When in doubt, more
+ *           |  proposals: splitting is an inconvenience, merging is a
+ *           |  sign-in as the wrong person.
+ * ------------------------------------------------------------------
  */
 export interface AdoptionGroup {
   /** Stable across a rescan, so a selection can be remembered. */
@@ -409,13 +415,14 @@ export function groupCandidates(candidates: AdoptionCandidate[]): AdoptionGroup[
   for (const c of alone) groups.push(make(proposedLabel(c), [c]));
 
   /**
-   * Open tabs first, then score.
-   *
-   * The other way round for a long time, which put whatever the jar considered
-   * most account-shaped at the top of a list of three hundred. On a used profile
-   * that is very often something signed into years ago and forgotten. What
-   * somebody wants to see on the first screen is the thing they have open, so
-   * that is what is at the top; score still decides everything within each half.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Open tabs first, then score.
+   *  Bug-Fix  |  The other way round for a long time put whatever the
+   *           |  jar thought most account-shaped atop a list of three
+   *           |  hundred, often something signed into years ago. People
+   *           |  want the thing they have open first; score still
+   *           |  decides within each half.
+   * ------------------------------------------------------------------
    */
   return groups.sort(
     (a, b) =>
@@ -426,33 +433,29 @@ export function groupCandidates(candidates: AdoptionCandidate[]): AdoptionGroup[
 }
 
 /**
- * What to tick before the user has touched anything.
- *
- * Only what looks like a signed-in account, and only what fits. A first run that
- * pre-selects a hundred sites is a first run where the button nobody read
- * creates a session holding the whole profile, and the estimate would be over
- * budget anyway.
- *
- * Capped, because a heavy profile can hold thirty of these and thirty sessions
- * on the first screen is not a setup, it is a mess somebody has to undo.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The cap on how many groups are pre-ticked on first run.
+ *  Note     |  Only signed-in accounts that fit are ticked; capped
+ *           |  because a heavy profile holds thirty, and thirty
+ *           |  sessions on the first screen is a mess to undo, not a
+ *           |  setup.
+ * ------------------------------------------------------------------
  */
 export const PRESELECT_CAP = 8;
 
 /**
- * What is ticked before the user has touched anything.
- *
- * Accounts with a tab open first, and that ordering is the whole point rather
- * than a refinement. The screen was built around the jar, which holds every
- * domain this browser has ever been given a cookie by, and offered the most
- * account-shaped of them. But somebody installing this has fifty tabs open and
- * a reason they wanted it, and that reason is sitting in those tabs: the
- * question in their head is "sort out what I am looking at", not "audit my
- * cookie jar". An account you have open right now is one you can recognise, and
- * one where the result of adopting it is visible immediately.
- *
- * Signed in and fitting are still required. An open tab is a reason to rank
- * something first, never on its own a reason to believe there is an account
- * there, which is the distinction `scoreDomain` exists to keep.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Which groups are ticked before the user touches
+ *           |  anything.
+ *  How      |  Accounts with a tab open first, and that ordering is the
+ *           |  point: someone installing this has fifty tabs open and a
+ *           |  reason sitting in them ("sort out what I am looking at",
+ *           |  not "audit my cookie jar"). An open account is one they
+ *           |  recognise and see the result of adopting at once.
+ *  Note     |  Signed in and fitting are still required. An open tab
+ *           |  ranks, never on its own evidence of an account, the
+ *           |  distinction scoreDomain keeps.
+ * ------------------------------------------------------------------
  */
 export function preselected(groups: AdoptionGroup[]): AdoptionGroup[] {
   const eligible = groups.filter((g) => g.signedIn && g.fits);

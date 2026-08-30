@@ -11,9 +11,12 @@
  */
 
 /**
- * The closed set of Pro capabilities, the same allowlist discipline the
- * telemetry events follow. A feature name has no path into anything but one of
- * these, so a typo is a compile error rather than a silently ungated feature.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The closed set of Pro capability names.
+ *  Note     |  A closed set, like the telemetry events: a name has no
+ *           |  path but one of these, so a typo is a compile error
+ *           |  rather than a silently ungated feature.
+ * ------------------------------------------------------------------
  */
 export type Feature =
   | 'idb_isolation'
@@ -35,10 +38,12 @@ export const FEATURES: readonly Feature[] = [
 ] as const;
 
 /**
- * `free` is the shipped product with no licence. `pro` is the sold set. A
- * `max_access` licence entitles every feature and is the tester and comp grant,
- * distinguishable from a paid `pro` in the studio so a retention number can
- * exclude the people who were never going to pay.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The tiers a decision can resolve to.
+ *  Note     |  free is the shipped product with no licence; pro is the
+ *           |  sold set; max_access is the tester and comp grant, kept
+ *           |  distinct so a retention number can exclude it.
+ * ------------------------------------------------------------------
  */
 export type Tier = 'free' | 'pro' | 'max_access';
 
@@ -46,10 +51,11 @@ export type Tier = 'free' | 'pro' | 'max_access';
 export type BuildTier = 'free' | 'pro';
 
 /**
- * The claims a token carries. Everything here is verified before it is trusted;
- * see `decideFromToken`. `dev` is the hard device binding this build enforces so
- * one licence unlocks one device at a time, and `feat` is either an explicit
- * list or `*` for everything (a `max_access` grant).
+ * ------------------------------------------------------------------
+ *  Purpose  |  The claims a token carries, verified before trusted.
+ *  Note     |  dev is the device binding, so one licence unlocks one
+ *           |  device at a time; feat is a list or "*" for all.
+ * ------------------------------------------------------------------
  */
 export interface LicenseClaims {
   /** Format version, so the shape can change without a silent mis-parse. */
@@ -95,9 +101,11 @@ function sameDecision(a: Decision, b: Decision): boolean {
 const SKEW_S = 120;
 
 /**
- * Everything this module needs from the outside, injected so it holds no
- * reference to `chrome` or `crypto` and runs unchanged under a test with a real
- * or a stubbed verifier.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Everything this module needs from the outside, injected.
+ *  Note     |  Holds no reference to chrome or crypto, so it runs
+ *           |  unchanged under a real or a stubbed verifier.
+ * ------------------------------------------------------------------
  */
 export interface EntitlementPorts {
   /** The tier this build was compiled as. A `free` build ignores every token. */
@@ -160,9 +168,12 @@ const KNOWN_TIERS = new Set<Tier>(['pro', 'max_access']);
 const FEATURE_SET = new Set<string>(FEATURES);
 
 /**
- * Structurally validates a decoded payload before any claim is trusted. A shape
- * that does not match is not a licence, and the difference between "malformed"
- * and "not present" is not worth distinguishing to the user: both are free.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Structurally validate a decoded payload before any
+ *           |  claim is trusted.
+ *  Note     |  A shape that does not match is not a licence. Malformed
+ *           |  and not-present are not worth distinguishing: both free.
+ * ------------------------------------------------------------------
  */
 function validClaims(raw: unknown): raw is LicenseClaims {
   if (!raw || typeof raw !== 'object') return false;
@@ -253,11 +264,13 @@ export async function decideFromToken(
 }
 
 /**
- * Holds the current decision and answers gate checks synchronously.
- *
- * `setToken` verifies and caches; `tier` and `entitled` read the cache and never
- * verify, so the check a Pro feature makes on every request is a set lookup. The
- * cache is recomputed only when the token string actually changes.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Hold the current decision and answer gate checks
+ *           |  synchronously.
+ *  How      |  setToken caches; tier and entitled read the cache and
+ *           |  never verify, so the per-request check is a set lookup.
+ *           |  Recomputed only when the token string changes.
+ * ------------------------------------------------------------------
  */
 export class Entitlement {
   private decision: Decision = FREE;
@@ -266,9 +279,12 @@ export class Entitlement {
   constructor(private readonly ports: EntitlementPorts) {}
 
   /**
-   * Sets (or clears, with null/empty) the current token and recomputes the
-   * decision. Idempotent for an unchanged token, so it is safe to call on every
-   * boot and after every refresh.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Set (or clear, with null/empty) the current token and
+   *           |  recompute the decision.
+   *  Note     |  Idempotent for an unchanged token, so it is safe to
+   *           |  call on every boot and after every refresh.
+   * ------------------------------------------------------------------
    */
   async setToken(token: string | null): Promise<Decision> {
     const t = token ?? '';

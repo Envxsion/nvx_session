@@ -1,41 +1,27 @@
 /**
- * State that has to outlive the worker and must not outlive the browser.
- *
- * Three things the kernel remembers are neither settings nor sessions. Which
- * session a closed tab was in, so `Ctrl+Shift+T` puts it back rather than
- * asking. Which tabs the user has deliberately left unmanaged, so the picker
- * does not come back the moment they navigate. And which tabs are older than
- * the fingerprint mask, so the posture leaves them alone rather than rewriting
- * the headers of a page it never reached.
- *
- * Both were plain `Map`s in the worker's heap, and that is wrong in a way no
- * unit test could see. A manifest v3 service worker is terminated when idle,
- * which on Chromium is thirty seconds of quiet, and everything in its heap goes
- * with it. So the reopen memory advertised an hour and in practice lasted until
- * the next lull: close a tab, read something, press `Ctrl+Shift+T`, and the tab
- * came back unbound and was asked about, which reads exactly like being signed
- * out. Measured rather than argued: stopping the worker between the close and
- * the reopen turns `rejoined=reo_a` into `rejoined=null, held=true` every time,
- * and that is the same failure the suite had been seeing at about two runs in
- * ten, where the eviction landed inside the phase by luck rather than by
- * design.
- *
- * The lifetime wanted here is exactly `chrome.storage.session`: kept in memory
- * by the browser rather than the worker, readable by the next worker, and
- * cleared when the browser closes. That last half matters as much as the first.
- * A browser restart is a different question with a different answer already:
- * `restoreAfterRestart` matches the tabs that came back against the bindings
- * that were saved, and it deliberately refuses to guess where two sessions were
- * open on one origin. Carrying this memory across a restart would let it guess
- * behind that check's back.
- *
- * Manifest v2 has no session area and its background page is persistent, so
- * there the heap already has the right lifetime and this degrades to a no-op.
- * That is a real configuration rather than a fallback: the Opera GX build ships
- * v2.
- *
- * Everything below the class is pure, so the encoding is testable without a
- * browser; `tests/ephemeral.test.ts` holds it.
+ * ------------------------------------------------------------------
+ *  Title    |  State that outlives the worker but not the browser
+ *  Ref      |  chrome.storage.session, restoreAfterRestart, tests/ephemeral.test.ts
+ *  ID       |  Ephemeral state
+ * ------------------------------------------------------------------
+ *  Purpose  |  Remember three things that are neither settings nor
+ *           |  sessions: which session a closed tab was in (for
+ *           |  Ctrl+Shift+T), which tabs are left unmanaged, and which
+ *           |  tabs predate the fingerprint mask.
+ *  How      |  Kept in chrome.storage.session: held by the browser not
+ *           |  the worker, readable by the next worker, cleared when
+ *           |  the browser closes.
+ *  Bug-Fix  |  Plain Maps in the worker heap died with the ~30s idle
+ *           |  kill, so reopen memory lasted until the next lull and a
+ *           |  reopened tab read as signed out. Clearing on browser
+ *           |  close also matters: restoreAfterRestart owns the restart
+ *           |  case and refuses to guess, so this must not guess behind
+ *           |  it.
+ *  Note     |  Manifest v2 has a persistent page and no session area,
+ *           |  so this degrades to a no-op there; the Opera GX build
+ *           |  ships v2. Everything below the class is pure.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 export interface ReopenEntry {
@@ -105,12 +91,14 @@ export function encodeEphemeral(maps: EphemeralMaps): EphemeralState {
 }
 
 /**
- * Rebuilds the maps, skipping anything that does not look right.
- *
- * Nothing here is trusted even though the worker wrote it: a build with a
- * different shape can have written it, and a single bad entry must not cost the
- * rest. Discarding one origin's queue means one tab gets asked about, which is
- * the safe direction; throwing would mean every tab does.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rebuild the maps, skipping anything that does not look
+ *           |  right.
+ *  Note     |  Nothing is trusted even though the worker wrote it: a
+ *           |  different build may have, and one bad entry must not
+ *           |  cost the rest. Discarding one origin's queue asks about
+ *           |  one tab; throwing would ask about every tab.
+ * ------------------------------------------------------------------
  */
 export function decodeEphemeral(raw: unknown): EphemeralMaps {
   const out = emptyEphemeral();
@@ -158,15 +146,16 @@ export function decodeEphemeral(raw: unknown): EphemeralMaps {
 }
 
 /**
- * Reads and writes the pair, coalescing bursts.
- *
- * Written eagerly rather than on the persistence debounce, and the difference
- * is the whole point: the event that records a reopen is a tab closing, which
- * is very often the last thing the worker does before it goes quiet and is
- * killed. A four hundred millisecond debounce is fine for a jar that is also
- * live in the rule set; it is not fine for the only copy of something. Sixty
- * milliseconds is enough to fold a window's worth of closes into one write and
- * far short of the idle timer that would end the worker.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Read and write the maps, coalescing bursts.
+ *  How      |  Written eagerly, not on the persistence debounce: the
+ *           |  event that records a reopen is a tab closing, often the
+ *           |  last thing the worker does before it is killed. 60ms
+ *           |  folds a window's worth of closes into one write and
+ *           |  stays far short of the idle timer.
+ *  Note     |  A 400ms debounce is fine for a jar also live in the rule
+ *           |  set; not for the only copy of something.
+ * ------------------------------------------------------------------
  */
 export class Ephemeral {
   private timer: ReturnType<typeof setTimeout> | null = null;

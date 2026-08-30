@@ -1,13 +1,18 @@
 /**
- * The type surface shared across the Pro seam.
- *
- * These declarations stay in the public tree even though the implementations
- * that satisfy them (license.ts, sync.ts) live in the private `pro` submodule.
- * The reason is single-source typing: the free stub in `pro.free.ts`, the real
- * classes in `pro/`, and the service worker that constructs and calls them all
- * refer to one definition of each shape, so a free build and a Pro build cannot
- * drift apart on what a licence status or a sync result looks like. Nothing here
- * is an algorithm or a secret; it is the contract, and a contract is public.
+ * ------------------------------------------------------------------
+ *  Title    |  Pro seam types
+ *  Ref      |  pro.free.ts, pro.ts, pro/ (private)
+ *  ID       |  Pro tier (DESIGN sec 30)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The shared type surface across the Pro seam.
+ *  How      |  These declarations stay public even though the code
+ *           |  that satisfies them lives in the private submodule, so
+ *           |  the free stub, the real classes and the worker all refer
+ *           |  to one definition of each shape and cannot drift.
+ *  Note     |  Nothing here is an algorithm or a secret; it is the
+ *           |  contract, and a contract is public.
+ *  Author   |  Ojas Kekre, 30/08/2026
+ * ------------------------------------------------------------------
  */
 
 import type { StorageArea } from './persist.js';
@@ -23,9 +28,12 @@ export interface SeatDevice {
 }
 
 /**
- * The outcome of an activation attempt, in the shape the settings screen acts
- * on. Everything the user might need to decide (a transfer, a retry, a support
- * mail) is a distinct case rather than a message string.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The outcome of an activation attempt, as the settings
+ *           |  screen acts on it.
+ *  Note     |  Each case the user might act on (transfer, retry,
+ *           |  support) is distinct rather than a message string.
+ * ------------------------------------------------------------------
  */
 export type ActivateResult =
   | { ok: true }
@@ -49,7 +57,7 @@ export interface HttpReply {
 
 export interface LicensePorts {
   storage: StorageArea;
-  /** The licence API base, e.g. https://session.nvx.sh/api/license, or null. */
+  /** The licence API base, or null when no endpoint is configured. */
   endpoint: () => string | null;
   /** POST json and return the parsed reply. Rejects only on a transport failure. */
   post: (url: string, body: string) => Promise<HttpReply>;
@@ -100,10 +108,12 @@ export interface SyncConfig {
 }
 
 /**
- * The envelope stored on the server. Every field but the version is opaque: the
- * salt and iv are not secret (they are meant to be stored in the clear beside the
- * ciphertext), and the ciphertext is unreadable without the passphrase-derived
- * key.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The envelope stored on the server.
+ *  Note     |  Every field but the version is opaque: the salt and iv
+ *           |  are not secret, and the ciphertext is unreadable without
+ *           |  the passphrase-derived key.
+ * ------------------------------------------------------------------
  */
 export interface SyncEnvelope {
   /** Envelope format version. */
@@ -142,7 +152,7 @@ export type SyncResult =
 
 export interface SyncPorts {
   storage: StorageArea;
-  /** The sync API base, e.g. https://session.nvx.sh/api/license/sync, or null. */
+  /** The sync API base, or null when no endpoint is configured. */
   endpoint: () => string | null;
   post: (url: string, body: string) => Promise<SyncHttpReply>;
   crypto: SyncCryptoPorts;
