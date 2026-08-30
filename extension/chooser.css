@@ -1,0 +1,268 @@
+/* The page a held tab shows instead of the site.
+
+   It is the only NVX surface a user meets without asking for it, so it carries
+   the whole weight of explaining itself in one screen: what is being held, why
+   nothing has loaded, and what picking each option does. Surfaces and type come
+   from ui/tokens.css, the same sheet the panel uses. */
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(110% 60% at 50% -10%, rgba(220, 234, 79, 0.05), transparent 60%),
+    radial-gradient(rgba(239, 240, 234, 0.02) 0.9px, transparent 0.9px);
+  background-size: auto, 7px 7px;
+}
+
+.stage {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 40px 24px;
+}
+
+.card {
+  width: 100%;
+  max-width: 520px;
+  animation: rise 0.5s var(--ease) both;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--signal);
+  margin: 0 0 18px;
+}
+
+h1 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: clamp(30px, 5vw, 42px);
+  line-height: 1.05;
+  letter-spacing: -0.014em;
+  margin: 0 0 14px;
+  text-wrap: balance;
+}
+
+.sub {
+  margin: 0 0 30px;
+  font-size: 13.5px;
+  font-weight: 300;
+  line-height: 1.55;
+  color: var(--mute);
+  max-width: 44ch;
+}
+
+.host {
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* ---------------------------------------------------------------- sessions */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--hair);
+  border: 1px solid var(--hair);
+  margin-bottom: 22px;
+}
+
+.waiting {
+  padding: 22px;
+  background: var(--panel-4);
+  margin: 0;
+}
+
+.opt {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 15px 17px;
+  background: var(--panel-4);
+  text-align: left;
+  position: relative;
+  transition:
+    background 0.16s var(--ease),
+    padding-left 0.16s var(--ease);
+  animation: rise 0.4s var(--ease) both;
+}
+
+.opt::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--tone);
+  transform: scaleY(0);
+  transform-origin: 50% 50%;
+  transition: transform 0.2s var(--ease);
+}
+
+.opt:hover,
+.opt:focus-visible {
+  background: var(--panel-3);
+  padding-left: 21px;
+  outline: none;
+}
+
+.opt:hover::before,
+.opt:focus-visible::before {
+  transform: scaleY(1);
+}
+
+.opt:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--hair-3);
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--tone);
+  flex: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 18%, transparent);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+}
+
+.who {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10.5px;
+  color: var(--mute-5);
+  margin-top: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--mute-7);
+  flex: none;
+  padding-left: 8px;
+}
+
+.tag--signin {
+  color: var(--signal);
+}
+
+.tag--last {
+  color: var(--fg-4);
+}
+
+/* -------------------------------------------------------------- the others */
+
+.alt {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--hair);
+  border: 1px solid var(--hair);
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 13px 17px;
+  background: var(--panel-5);
+  text-align: left;
+  transition:
+    background 0.16s var(--ease),
+    padding-left 0.16s var(--ease);
+}
+
+.line:hover,
+.line:focus-visible {
+  background: var(--panel-3);
+  padding-left: 21px;
+  outline: none;
+}
+
+.line-mark {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--mute-7);
+  width: 9px;
+  text-align: center;
+  flex: none;
+}
+
+.line:hover .line-mark {
+  color: var(--signal);
+}
+
+.line-body {
+  min-width: 0;
+}
+
+.line-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.line-note {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 300;
+  color: var(--mute-7);
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------------------- foot */
+
+.foot {
+  margin: 24px 0 0;
+}
+
+.dest {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--mute-8);
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card.going {
+  animation: leave 0.26s var(--ease) both;
+}
+
+@keyframes leave {
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.995);
+  }
+}

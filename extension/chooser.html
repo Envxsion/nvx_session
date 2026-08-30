@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NVX Session</title>
+    <link rel="stylesheet" href="ui/tokens.css" />
+    <link rel="stylesheet" href="chooser.css" />
+  </head>
+  <body>
+    <main class="stage">
+      <div class="card" id="card">
+        <p class="eyebrow">NVX SESSION // HELD</p>
+        <h1 id="title">Which account?</h1>
+        <p class="sub">
+          <span id="host" class="host">this site</span> has more than one of your accounts.
+          Nothing has been requested yet.
+        </p>
+
+        <div class="list" id="list">
+          <p class="waiting" data-label>reading sessions</p>
+        </div>
+
+        <div class="alt">
+          <button class="line" id="fresh" type="button">
+            <span class="line-mark">+</span>
+            <span class="line-body">
+              <span class="line-name">New session</span>
+              <span class="line-note">Sign in as somebody else, kept apart from the rest</span>
+            </span>
+          </button>
+          <button class="line" id="once" type="button">
+            <span class="line-mark">&#183;</span>
+            <span class="line-body">
+              <span class="line-name">Just this once</span>
+              <span class="line-note">Open it the way the browser normally would, unmanaged</span>
+            </span>
+          </button>
+        </div>
+
+        <p class="foot">
+          <span class="dest" id="dest"></span>
+        </p>
+      </div>
+    </main>
+    <script src="chooser.js"></script>
+  </body>
+</html>

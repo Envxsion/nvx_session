@@ -1,0 +1,179 @@
+{
+  "env": {
+    "browser": "Opera",
+    "operaVersion": "134.0.0.0",
+    "chromiumVersion": "150.0.0.0",
+    "chromiumMajor": 150,
+    "manifestVersion": 2,
+    "brands": [
+      "Not;A=Brand 8",
+      "Chromium 150",
+      "Opera GX 134"
+    ],
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 OPR/134.0.0.0",
+    "platform": "Windows"
+  },
+  "static": [
+    {
+      "id": "dnr.present",
+      "verdict": "pass",
+      "detail": "chrome.declarativeNetRequest exists"
+    },
+    {
+      "id": "dnr.limits",
+      "verdict": "pass",
+      "detail": "session 5000, dynamic 30000, static 100",
+      "sessionRules": 5000,
+      "dynamicRules": 30000
+    },
+    {
+      "id": "dnr.sessionRules",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.tabIds",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.setRequestCookie",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.removeSetCookie",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.responseHeaderCondition",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.domainType",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.mainFrameVariant",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.getMatchedRules",
+      "verdict": "fail",
+      "detail": "threw: The extension must have the declarativeNetRequestFeedback permission or have activeTab granted for the specified tab ID in order to call this function."
+    },
+    {
+      "id": "scripting.present",
+      "verdict": "absent",
+      "detail": "no scripting namespace, expected on MV2"
+    },
+    {
+      "id": "webRequest.present",
+      "verdict": "pass",
+      "detail": "onHeadersReceived available"
+    },
+    {
+      "id": "webRequest.extraHeaders",
+      "verdict": "pass",
+      "detail": "non-blocking listener with extraHeaders accepted"
+    },
+    {
+      "id": "webRequest.blocking",
+      "verdict": "pass",
+      "detail": "BLOCKING AVAILABLE. The MV2 backend is viable here."
+    },
+    {
+      "id": "api.debugger",
+      "verdict": "pass",
+      "detail": "available, T2 protocol tier"
+    },
+    {
+      "id": "api.tabGroups",
+      "verdict": "absent",
+      "detail": "missing, native tab colour binding unavailable"
+    },
+    {
+      "id": "api.offscreen",
+      "verdict": "absent",
+      "detail": "missing, conductor runner unavailable"
+    },
+    {
+      "id": "api.userScripts",
+      "verdict": "absent",
+      "detail": "missing, alternative MAIN injection unavailable"
+    },
+    {
+      "id": "api.cookies",
+      "verdict": "pass",
+      "detail": "available, adoption sweep"
+    },
+    {
+      "id": "cookies.partitionKey",
+      "verdict": "pass",
+      "detail": "CHIPS partitionKey accepted"
+    },
+    {
+      "id": "runtime.dynamicUrl",
+      "verdict": "fail",
+      "detail": "resource URL contains the static extension id, probeable from a page"
+    }
+  ],
+  "live": [
+    {
+      "id": "cookieSubstitution",
+      "verdict": "pass",
+      "detail": "Managed tab sent only the injected value, so substitution works. Control arm inconclusive: unmanaged tab sent nvx_blocking=b_1786846717737",
+      "extra": {
+        "sent": "nvx_vault=vault_1786846717642",
+        "controlSent": "nvx_blocking=b_1786846717737",
+        "seeded": true
+      },
+      "ms": 289
+    },
+    {
+      "id": "blockingRewrite",
+      "verdict": "pass",
+      "detail": "A blocking listener actually rewrote the Cookie header. The MV2 style backend is real here, which closes the service worker gap and the flush race.",
+      "extra": {
+        "sent": "nvx_blocking=b_1786846717931"
+      },
+      "ms": 103
+    },
+    {
+      "id": "stripVersusObserve",
+      "verdict": "pass",
+      "detail": "Observer saw Set-Cookie and the rule kept it out of the profile jar. Capture and suppress both work.",
+      "extra": {
+        "sawIt": true,
+        "landed": false
+      },
+      "ms": 488
+    },
+    {
+      "id": "injectionOrder",
+      "verdict": "absent",
+      "detail": "No chrome.scripting here. On MV2 the equivalent is a declared content_scripts pair, which the MV2 probe build carries instead.",
+      "ms": 0
+    },
+    {
+      "id": "serviceWorkerAttribution",
+      "verdict": "fail",
+      "detail": "Confirmed: 1/1 service worker requests carry tabId -1. The gap in DESIGN.html section 07 is real, mitigation (a) required.",
+      "extra": {
+        "seen": [
+          {
+            "tabId": -1,
+            "type": "xmlhttprequest",
+            "initiator": "http://localhost:8787"
+          }
+        ]
+      },
+      "ms": 1468
+    }
+  ],
+  "at": "2026-08-16T02:18:39.993Z"
+}

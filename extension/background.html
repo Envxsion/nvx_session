@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>NVX Session</title>
+  </head>
+  <body>
+    <!--
+      MV2 only. A background page rather than a service worker, which is the
+      whole reason this build exists: the page is persistent, so the lifecycle
+      races the MV3 build is designed around simply do not arise.
+
+      Loaded as a module so the same compiled output serves both manifest
+      versions. MV2 background *scripts* are classic scripts and could not
+      import anything; a background page can carry a module script tag.
+    -->
+    <script type="module" src="src/bg/index.js"></script>
+  </body>
+</html>

@@ -1,0 +1,234 @@
+{
+  "trigger": "onInstalled",
+  "env": {
+    "browser": "Chrome",
+    "operaVersion": null,
+    "chromiumVersion": "151.0.0.0",
+    "chromiumMajor": 151,
+    "manifestVersion": 3,
+    "brands": [
+      "Not=A?Brand 99",
+      "Google Chrome 151",
+      "Chromium 151"
+    ],
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+    "platform": "Windows"
+  },
+  "static": [
+    {
+      "id": "dnr.present",
+      "verdict": "pass",
+      "detail": "chrome.declarativeNetRequest exists"
+    },
+    {
+      "id": "dnr.limits",
+      "verdict": "pass",
+      "detail": "session 5000, dynamic 30000, static 100",
+      "sessionRules": 5000,
+      "dynamicRules": 30000
+    },
+    {
+      "id": "dnr.sessionRules",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.tabIds",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.setRequestCookie",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.removeSetCookie",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.responseHeaderCondition",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.domainType",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.mainFrameVariant",
+      "verdict": "pass",
+      "detail": "rule accepted and readable back"
+    },
+    {
+      "id": "dnr.getMatchedRules",
+      "verdict": "pass",
+      "detail": "callable, feedback permission granted"
+    },
+    {
+      "id": "scripting.present",
+      "verdict": "pass",
+      "detail": "chrome.scripting available"
+    },
+    {
+      "id": "scripting.mainWorld",
+      "verdict": "pass",
+      "detail": "registered with world MAIN at document_start"
+    },
+    {
+      "id": "scripting.matchOriginAsFallback",
+      "verdict": "pass",
+      "detail": "about:blank and srcdoc frames reachable"
+    },
+    {
+      "id": "webRequest.present",
+      "verdict": "pass",
+      "detail": "onHeadersReceived available"
+    },
+    {
+      "id": "webRequest.extraHeaders",
+      "verdict": "pass",
+      "detail": "non-blocking listener with extraHeaders accepted"
+    },
+    {
+      "id": "webRequest.blocking",
+      "verdict": "pass",
+      "detail": "Listener attached. This alone proves nothing: both Chrome and Opera accept it under MV3 and then ignore the return value. See the blockingRewrite functional test."
+    },
+    {
+      "id": "api.debugger",
+      "verdict": "pass",
+      "detail": "available, T2 protocol tier"
+    },
+    {
+      "id": "api.tabGroups",
+      "verdict": "pass",
+      "detail": "available, native tab colour binding"
+    },
+    {
+      "id": "api.offscreen",
+      "verdict": "pass",
+      "detail": "available, conductor runner"
+    },
+    {
+      "id": "api.userScripts",
+      "verdict": "absent",
+      "detail": "missing, alternative MAIN injection unavailable"
+    },
+    {
+      "id": "api.cookies",
+      "verdict": "pass",
+      "detail": "available, adoption sweep"
+    },
+    {
+      "id": "cookies.partitionKey",
+      "verdict": "pass",
+      "detail": "CHIPS partitionKey accepted"
+    },
+    {
+      "id": "runtime.dynamicUrl",
+      "verdict": "pass",
+      "detail": "use_dynamic_url honoured, id not leaked"
+    }
+  ],
+  "live": [
+    {
+      "id": "cookieSubstitution",
+      "verdict": "pass",
+      "detail": "Managed tab sent only the injected value; unmanaged tab kept the profile jar. Per-tab substitution confirmed.",
+      "extra": {
+        "sent": "nvx_vault=vault_1786852133297",
+        "controlSent": "nvx_real=profile_1786852133297",
+        "seeded": true
+      },
+      "ms": 119
+    },
+    {
+      "id": "blockingRewrite",
+      "verdict": "fail",
+      "detail": "Listener attached but its return value was ignored. Origin received: null",
+      "extra": {
+        "sent": null
+      },
+      "ms": 51
+    },
+    {
+      "id": "serviceWorkerOwnership",
+      "verdict": "pass",
+      "detail": "A tabIds [-1] rule DID attribute service worker traffic. Single-session ownership is viable, so blanket service worker blocking is not required.",
+      "extra": {
+        "sent": "nvx_swown=o_1786852133467"
+      },
+      "ms": 258
+    },
+    {
+      "id": "debuggerOnServiceWorker",
+      "verdict": "pass",
+      "detail": "Attached to the service worker target and rewrote its Cookie header (1 request(s) intercepted). Closes the gap without touching any tab.",
+      "extra": {
+        "sent": "nvx_swdbg=d_1786852133725",
+        "paused": 1
+      },
+      "ms": 3566
+    },
+    {
+      "id": "stripVersusObserve",
+      "verdict": "pass",
+      "detail": "Observer saw Set-Cookie and the rule kept it out of the profile jar. Capture and suppress both work.",
+      "extra": {
+        "sawIt": true,
+        "landed": false
+      },
+      "ms": 1409
+    },
+    {
+      "id": "injectionOrder",
+      "verdict": "pass",
+      "detail": "ISOLATED ran first in all 5 runs and MAIN read the seed. Delivery path B is viable. [\"iso,main\",\"iso,main\",\"iso,main\",\"iso,main\",\"iso,main\"]",
+      "extra": {
+        "runs": [
+          {
+            "seq": "iso,main",
+            "seeded": "ok"
+          },
+          {
+            "seq": "iso,main",
+            "seeded": "ok"
+          },
+          {
+            "seq": "iso,main",
+            "seeded": "ok"
+          },
+          {
+            "seq": "iso,main",
+            "seeded": "ok"
+          },
+          {
+            "seq": "iso,main",
+            "seeded": "ok"
+          }
+        ]
+      },
+      "ms": 5276
+    },
+    {
+      "id": "serviceWorkerAttribution",
+      "verdict": "fail",
+      "detail": "Confirmed: 1/1 service worker requests carry tabId -1. The gap in DESIGN.html section 07 is real, mitigation (a) required.",
+      "extra": {
+        "seen": [
+          {
+            "tabId": -1,
+            "type": "xmlhttprequest",
+            "initiator": "http://localhost:8787"
+          }
+        ]
+      },
+      "ms": 2445
+    }
+  ],
+  "tookMs": 13145,
+  "at": "2026-08-16T03:49:06.422Z"
+}

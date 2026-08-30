@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NVX Capability Probe</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <p class="eyebrow">NVX // CAPABILITY PROBE</p>
+      <h1>Does the architecture hold?</h1>
+      <p class="standfirst">
+        Three assumptions in the design are load-bearing and unverified. Presence checks cannot
+        settle them, so every probe below calls the real API with the exact shape NVX Session
+        depends on and reports what actually came back.
+      </p>
+
+      <div class="env" id="env">
+        <span>reading environment</span>
+      </div>
+
+      <div class="fixture">
+        <span class="dot" id="fixture-dot" aria-hidden="true"></span>
+        <span>FIXTURE</span>
+        <code id="fixture-url">http://localhost:8787</code>
+        <span class="hint" id="fixture-hint"></span>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn--primary" id="run-static" type="button">Run API surface</button>
+        <button class="btn" id="run-live" type="button">Run functional tests</button>
+        <button class="btn" id="export" type="button" disabled>Copy report</button>
+      </div>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>API surface</h2>
+          <div class="tally" id="tally-static"></div>
+        </div>
+        <div class="rows" id="rows-static">
+          <p class="empty">NOT RUN YET</p>
+        </div>
+      </section>
+
+      <section class="group">
+        <div class="group-head">
+          <h2>Functional</h2>
+          <div class="tally" id="tally-live"></div>
+        </div>
+        <div class="rows" id="rows-live">
+          <p class="empty">NOT RUN YET. START THE FIXTURE FIRST.</p>
+        </div>
+      </section>
+    </div>
+
+    <script src="panel.js"></script>
+  </body>
+</html>

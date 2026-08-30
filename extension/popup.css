@@ -1,0 +1,1615 @@
+/* The toolbar popup, which is the whole product.
+
+   It loads panel.css first and overrides it rather than restating it, because
+   the two surfaces show the same rows and a second copy of those rules is a
+   second thing to keep in step.
+
+   Three things this file is responsible for that the component sheet is not.
+
+   The gutter. panel.css pads every component by --gut and this is where the
+   popup declares what that is. Nothing in the popup may set its own horizontal
+   padding on a row, a note or a heading; it sets --gut and the components
+   follow. That is the whole fix for content sitting on the edge of the glass.
+
+   The depth. A popup is a solid rectangle with no page around it, so if every
+   surface in it is within four points of black it reads as one black slab and
+   nothing looks raised or pressable. The frame recedes to --chrome, the
+   content sits on --lift, and rows and controls carry a light fill on top of
+   that. Three real steps, not three shades of the same one.
+
+   The scroll. A list that runs past the fold with no visible rail and no edge
+   treatment is a list nobody knows continues. The stage keeps a real
+   scrollbar and fades under the nav while there is more below it. */
+
+body {
+  --gut: 16px;
+  /**
+   * One width for every view, and that is a correction.
+   *
+   * It used to be 420 for home, 520 for two views, 600 for four and 700 with a
+   * sheet open, on the reasoning that each view should get the width it wants.
+   * What that produces in use is a panel that lunges sideways every time you
+   * press anything in the nav, and because the browser sizes the popup window
+   * from the document, the lunge is a window resize rather than a box growing:
+   * the pointer ends up somewhere else on the screen relative to what it was
+   * over. Reading a wide view is worth less than not being thrown around
+   * between views, and the widest thing here reads perfectly well at this.
+   *
+   * 480 rather than a compromise between the old extremes. It is wide enough
+   * for the journal's fixed left column and the guide's prose, and narrow
+   * enough that the home view is not mostly gutter.
+   */
+  width: 480px;
+  /* Height follows the content, which is the axis a popup actually has. Pinned
+     at 580 the home view ended on 250 pixels of empty black above the nav,
+     which reads as a surface that failed to load rather than as a short view.
+     The cap is what the browser allows a popup anyway; below it, min-height
+     stops a one-line state collapsing into a strip. */
+  height: auto;
+  min-height: 260px;
+  max-height: 596px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+  position: relative;
+  /* No transition on the width, deliberately.
+     The browser sizes the popup window from the document, so a CSS transition
+     on the width does not animate a box inside a window: it asks the browser to
+     resize the window sixty times over a quarter of a second. What that
+     produced was a staircase, a scrollbar appearing and disappearing through
+     it, and content clipped against a frame that had not caught up. One jump is
+     something the browser does cleanly; an animated one is not. */
+}
+
+/* No per-view width. See the note on body: the panel is one width and grows
+   downward, which is the direction a popup has room in. */
+
+body::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(120% 42% at 50% -12%, rgba(220, 234, 79, 0.06), transparent 64%),
+    radial-gradient(rgba(239, 240, 234, 0.022) 0.9px, transparent 0.9px);
+  background-size: auto, 7px 7px;
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* A display rule on a section outranks the hidden attribute, so a block that
+   asked to be hidden stays on screen with nothing in it. Caught by looking. */
+[hidden] {
+  display: none !important;
+}
+
+/* -------------------------------------------------------------------- bar */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px var(--gut) 11px;
+  border-bottom: 1px solid var(--edge);
+  background: var(--chrome);
+  flex: none;
+}
+
+.back {
+  font-family: var(--font-mono);
+  font-size: 17px;
+  line-height: 1;
+  color: var(--fg-4);
+  width: 18px;
+  height: 18px;
+  margin-right: -2px;
+  transition: color 0.16s var(--ease), transform 0.16s var(--ease);
+}
+
+.back:hover,
+.back:focus-visible {
+  color: var(--signal);
+  transform: translateX(-2px);
+  outline: none;
+}
+
+.mark {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  display: block;
+}
+
+.wordmark {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  color: var(--fg-2);
+  text-transform: uppercase;
+}
+
+/* The site is context, not a heading, so it gets the chip rather than another
+   line of grey text competing with the view name beside it. */
+.host {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 11px;
+  color: var(--fg-4);
+  background: var(--chalk);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 3px 7px;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.host:empty {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ stage */
+
+/* The fade belongs to the frame, not to the scroller. An absolutely
+   positioned child of a scrolling element scrolls away with the content, so
+   pinning it to .stage puts the edge treatment at the bottom of the list
+   rather than at the bottom of the window, which is the one place it does no
+   good at all. */
+.stage-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+  background: var(--lift);
+}
+
+.stage {
+  flex: 1;
+  min-width: 0;
+}
+
+/* More below, and the reason a list looked truncated rather than scrollable.
+   The rail alone is not enough at this size: it is nine pixels of low contrast
+   against a dark edge. Content running under a soft edge is what people read
+   as "there is more", so the fade is the affordance and the rail is the
+   control. Both, or neither works. */
+.stage-wrap::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 46px;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 2;
+  background: linear-gradient(to top, var(--lift) 14%, transparent);
+  transition: opacity 0.2s var(--ease);
+}
+body.more-below .stage-wrap::after {
+  opacity: 1;
+}
+
+.view {
+  animation: rise 0.3s var(--ease) both;
+  padding-bottom: 10px;
+}
+
+/* The panel's sections were built for a page with a wrap around them. Here the
+   view is the wrap, so the block sheds the page furniture it no longer needs.
+   It sheds only the frame: the gutter comes back through --gut. */
+.view .block {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+/**
+ * Wraps, because three controls and a title do not fit on one line.
+ *
+ * The base is a single flex row with the title on `flex: 1` and the actions on
+ * `flex: none`, which is correct while the actions are narrower than what is
+ * left. At 600 pixels they were. At 480 the sessions head has a title and three
+ * buttons that refuse to shrink, so the actions overflowed the row and sat on
+ * top of the word Sessions.
+ *
+ * Allowing the row to wrap rather than shrinking the buttons: a mono label
+ * clipped to fit says less than one on its own line, and these three are the
+ * only way into everything this view does.
+ */
+.view .block-head {
+  padding: 14px var(--gut) 11px;
+  margin: 0;
+  border-bottom: 1px solid var(--edge);
+  background: var(--chrome);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+
+/* Once it wraps, the actions take the whole of the second line and share it,
+   which is the same equal-width treatment they had beside the title. */
+.view .block-head > h2 {
+  flex: 1 0 100%;
+}
+
+.view .block-head h2 {
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+/* Two or more actions in a head share the width equally. Left to size
+   themselves, "ADOPT EXISTING" comes out half again as wide as "NEW SESSION"
+   and the pair reads as two unrelated controls rather than one choice. */
+.view .head-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 7px;
+  flex: 1 1 100%;
+  min-width: 0;
+}
+.view .head-actions .btn,
+.view .block-head > .btn {
+  min-width: 0;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 10.5px;
+  letter-spacing: 0.11em;
+}
+.view .block-head > .btn {
+  width: auto;
+  min-width: 92px;
+}
+
+.view .rows,
+.view .channels {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+/**
+ * One scroller in the popup, and it is the stage.
+ *
+ * `[data-scrollable]` is a shared token that grants `overflow-y: auto` and
+ * `overscroll-behavior: contain`. On a full page that pairing is right: a
+ * region scrolls itself and does not drag the document behind it. Inside the
+ * popup every list carries the same attribute while sitting inside the stage,
+ * which carries it too, so each list was a scroll container nested in a scroll
+ * container that had been told not to chain.
+ *
+ * The effect is the one reported and it is worse than an ordinary bug, because
+ * it is invisible to every test that scrolls by assignment. `scrollTop = 120`
+ * moves the stage and passes. A wheel or a trackpad over the list is caught by
+ * the inner container, which has nothing to scroll, and `contain` stops it
+ * reaching the stage that does, so the view sits still. The rail worked, the
+ * wheel did not, and the difference between those two is exactly the difference
+ * between how the suite drives this and how a person does.
+ *
+ * So inside a view nothing scrolls but the stage. The attribute stays on the
+ * markup because it is also what styles the rail on the pages that do scroll
+ * their own regions.
+ */
+.view [data-scrollable] {
+  overflow-y: visible;
+  overscroll-behavior: auto;
+}
+
+/* A field is a sheet component, and sheets carry their own padding. Standing on
+   its own inside a view it has none, so it takes the gutter like everything
+   else here rather than sitting on the glass. */
+.view .field {
+  padding: 13px var(--gut) 4px;
+  gap: 10px;
+}
+
+.view .seg-note {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.55;
+  letter-spacing: 0;
+  color: var(--mute-5);
+  min-height: 0;
+}
+
+.view .row {
+  background: var(--lift);
+}
+/* Not while armed. Hover here is the same specificity as the arming rule and
+   sits later in the cascade, so without the exclusion a row one press from
+   deleting a jar loses its alarm colour the moment the pointer is over it,
+   which is exactly when it is being read. */
+.view .row:not(.arming):hover {
+  background: var(--lift-2);
+}
+.view .row--tp-head:hover {
+  background: var(--lift-3);
+}
+
+/* One line under a session's third-party switch that says what the per-party
+   controls do right now, so the session-wide mode and the per-party spares are
+   never read as the same thing. A left rule in the mode's colour, signal for
+   blocking (the protective state), alarm-tinted for allowing all. */
+.view .tp-mode {
+  margin: 0;
+  padding: 8px var(--gut) 10px calc(var(--gut) + 9px);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--mute-5);
+  border-left: 2px solid var(--edge-2);
+}
+.view .tp-mode--block {
+  border-left-color: color-mix(in srgb, var(--signal) 55%, transparent);
+}
+.view .tp-mode--allow {
+  border-left-color: color-mix(in srgb, var(--alarm) 55%, transparent);
+}
+
+/* A shade smaller than on the page. The same 13 pixels that reads as body copy
+   across a 900 pixel column reads as oversized across 520, and these notes are
+   context rather than the thing being looked at. */
+.view .note {
+  padding: 12px var(--gut) 2px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--mute-5);
+}
+
+.view .note--lead {
+  padding: 13px var(--gut) 2px;
+  margin: 0;
+}
+
+/* -------------------------------------------------------------------- home */
+
+.here {
+  padding: 17px var(--gut) 15px;
+  /* --tone is set per session from script; the wash is what makes the hero
+     belong to that account rather than being a generic header with a coloured
+     dot somewhere in it. */
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--tone, transparent) 14%, transparent),
+      transparent 78%
+    ),
+    var(--lift);
+  border-bottom: 1px solid var(--edge);
+}
+
+.here-skeleton {
+  padding: 10px 0;
+}
+
+.here-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* The session glyph: a ring with a gap turned by the session id, so two
+   sessions differ by shape as well as by hue. Colour alone is not a channel
+   everybody has, and this costs nothing. */
+.glyph {
+  width: 38px;
+  height: 38px;
+  flex: none;
+}
+
+.here-body {
+  min-width: 0;
+}
+
+.here-name {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 25px;
+  line-height: 1.06;
+  letter-spacing: -0.012em;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.here-who {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 11px;
+  color: var(--fg-4);
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.here-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 13px;
+}
+
+/* Each reading is its own chip. As a run of spaced grey text they blur into
+   one line and none of the numbers is findable. */
+.here-meta span {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10.5px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--mute-5);
+  background: var(--chalk);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 4px 8px;
+}
+
+.here-meta b {
+  color: var(--fg-2);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.here--none .here-name {
+  color: var(--mute-3);
+}
+
+.here-note {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  font-weight: 300;
+  line-height: 1.5;
+  color: var(--mute-5);
+}
+
+/* The default-account hint. It carries a left rail in the session's own tone so
+   it reads as "this account", and sits a step brighter than a plain note
+   because the whole point is that it is noticed before you act. */
+.here-identity {
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  border-left: 2px solid var(--tone, var(--signal));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--tone, var(--signal)) 8%, transparent);
+  font-size: 12px;
+  font-weight: 300;
+  line-height: 1.5;
+  color: var(--fg-3);
+}
+
+/* Not .switch: panel.css owns that name for the toggle knob, and the collision
+   turned this section into a sixty pixel column. The rename went one node too
+   far last time and stripped the adopt sheet's toggle down to this border, so
+   the pairing is worth stating: .switch is the knob, .moveto is this. */
+.moveto {
+  padding: 13px var(--gut) 6px;
+}
+
+.lede {
+  margin: 0 0 9px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.opt {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 10px 11px;
+  background: var(--chalk);
+  border: 1px solid var(--edge);
+  border-radius: 5px;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+  transition:
+    background 0.16s var(--ease),
+    border-color 0.16s var(--ease),
+    transform 0.16s var(--ease);
+}
+
+/* The entrance plays once, when the popup opens, because that is what an
+   entrance means. The list is repainted whenever the worker's state actually
+   changes, and replaying this on a cookie count going from three to four says
+   something appeared that did not. */
+.opt-enter .opt {
+  animation: rise 0.32s var(--ease) both;
+}
+
+.opt:hover,
+.opt:focus-visible {
+  background: var(--chalk-2);
+  border-color: var(--edge-3);
+  transform: translateX(3px);
+  outline: none;
+}
+
+.opt:focus-visible {
+  border-color: var(--signal);
+}
+
+/* The switch, felt rather than announced: the row fills with the session's own
+   colour from the left, and lasts exactly as long as the rebind takes. */
+.opt::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--tone);
+  opacity: 0.2;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  pointer-events: none;
+}
+
+.opt.going::after {
+  animation: fill 0.34s var(--ease) forwards;
+}
+
+@keyframes fill {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.opt .dot {
+  --dot-tone: var(--tone);
+  width: 9px;
+  height: 9px;
+}
+
+/* The one row that makes a session rather than choosing one. It gets the
+   dashed edge so it reads as an empty slot to fill, and it still carries a
+   coloured dot, because the colour it would be given is the thing worth
+   knowing before pressing it. */
+.opt--new {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--edge-2);
+}
+.opt--new:hover,
+.opt--new:focus-visible {
+  background: var(--chalk);
+  border-style: solid;
+}
+.opt--new .dot {
+  opacity: 0.85;
+}
+
+.opt-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.opt-name {
+  font-size: 13px;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opt-sub {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10.5px;
+  color: var(--mute-5);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opt-tag {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--fg-4);
+  flex: none;
+}
+.opt-tag:empty {
+  display: none;
+}
+
+.opt-tag--fresh {
+  color: var(--signal);
+}
+
+/* ----------------------------------------------------------------- health */
+
+.health {
+  display: flex;
+  gap: 6px;
+  padding: 4px var(--gut) 14px;
+}
+
+.vital {
+  flex: 1;
+  padding: 9px 10px;
+  background: var(--chalk);
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  min-width: 0;
+}
+
+.vital-k {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--mute-5);
+}
+
+.vital-v {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-2);
+  margin-top: 5px;
+}
+
+/* Colour only when something is wrong. A dashboard that is always green teaches
+   people to stop reading it. */
+.vital--good .vital-v {
+  color: var(--ok);
+}
+
+.vital--bad {
+  background: rgba(196, 97, 74, 0.1);
+  border-color: rgba(196, 97, 74, 0.4);
+}
+
+.vital--bad .vital-v {
+  color: var(--alarm);
+}
+
+.vital--bad .vital-k {
+  color: var(--alarm);
+  opacity: 0.8;
+}
+
+/* Reserved for a live isolation fault. Nothing else here pulses. */
+.vital--alarm .vital-v {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+/* ------------------------------------------------------------------ leak
+
+   The alarm proper. A reading somebody has to open the popup to find is not an
+   alarm, so a live leak takes the whole top of the home view and says what to
+   do about it. It is the only thing in here allowed to interrupt. */
+
+.leak {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin: 0;
+  padding: 13px var(--gut);
+  background: rgba(196, 97, 74, 0.14);
+  border-bottom: 1px solid rgba(196, 97, 74, 0.45);
+}
+
+.leak-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--alarm);
+  margin-top: 5px;
+  flex: none;
+  box-shadow: 0 0 0 4px rgba(196, 97, 74, 0.22);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.leak-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.leak-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--alarm);
+}
+
+.leak-text {
+  font-size: 12.5px;
+  font-weight: 300;
+  line-height: 1.5;
+  color: var(--fg-2);
+  margin: 6px 0 0;
+}
+
+.leak-acts {
+  display: flex;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+/* The consent card is an invitation, not an alarm, so it wears the signal
+   rather than the alarm the base .leak carries. Red on a "help improve this?"
+   prompt reads as something went wrong, which is the opposite of the ask. */
+.leak--consent {
+  background: color-mix(in srgb, var(--signal) 11%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--signal) 42%, transparent);
+}
+.leak--consent .leak-title {
+  color: var(--signal);
+}
+
+/* The caution is a heads-up, not an alarm and not an invitation, so it wears
+   amber: red would read as something is broken now, green as a positive. Amber
+   is the register for "know this before it happens". */
+.leak--caution {
+  background: rgba(236, 169, 58, 0.1);
+  border-bottom-color: rgba(236, 169, 58, 0.4);
+}
+.leak--caution .leak-title {
+  color: #eca93a;
+}
+
+/* -------------------------------------------------------------------- nav */
+
+/* Four across, wrapping to a second row.
+
+   Eight cells in one row across 400 pixels is fifty pixels each, which forces
+   the label down to eight point type and still clips the longest one. Four
+   doubles the cell, lets the type come back up to something a person can read
+   at a glance, and costs twenty pixels of height the popup has. */
+.nav {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  flex: none;
+  border-top: 1px solid var(--edge);
+  /* Shows through the gap as a hairline between cells, so the grid reads as a
+     grid rather than as eight words floating on one surface. */
+  background: var(--hair);
+  gap: 1px;
+}
+
+.nav-b {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 11px 4px 12px;
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--mute-5);
+  position: relative;
+  min-width: 0;
+  white-space: nowrap;
+  background: var(--chrome);
+  transition: color 0.16s var(--ease), background 0.16s var(--ease);
+}
+
+.nav-b::before {
+  content: '';
+  position: absolute;
+  /* Inside the cell, not on its edge.
+     At -1px the bar straddled the hairline, and in a two row grid the hairline
+     above a cell is the boundary it shares with the cell above it, so the mark
+     read as underlining the wrong item: on the guide view it appeared to be
+     marking Parties. One pixel down and it belongs to the cell it is in. */
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--signal);
+  transform: scaleX(0);
+  transition: transform 0.22s var(--ease);
+}
+
+.nav-b:hover,
+.nav-b:focus-visible {
+  color: var(--fg-2);
+  background: var(--chalk);
+  outline: none;
+}
+
+.nav-b[aria-current='true'] {
+  color: var(--signal);
+  /* A step past hover, which is otherwise the same surface, so the current view
+     is distinguishable from the one under the pointer. */
+  background: var(--chalk-2);
+}
+
+.nav-b[aria-current='true']::before {
+  transform: scaleX(1);
+}
+
+/* A count that only appears when there is something to count.
+
+   Inline rather than pinned to the corner. A corner badge on a 66 pixel cell
+   sits on top of its own label, and "PARTIE(2)S" is worse than no count at
+   all. Inline, the cell grows by the width of one glyph and the nav absorbs
+   it, because the columns are equal fractions rather than fixed. */
+.nav-n {
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--alarm);
+  color: var(--fg);
+  font-size: 9.5px;
+  line-height: 13px;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+/* ----------------------------------------------------------------- sheets */
+
+/* The panel's sheets are sized for a page. In here they are the whole surface,
+   because a modal inside a 600 pixel popup with a scrim around it would leave
+   about forty pixels of dialog. */
+/**
+ * A sheet is a view, so it grows the window like one.
+ *
+ * The browser sizes the popup window to its document, growing to fit taller
+ * content up to the 600 pixel ceiling and scrolling only past that. Views get
+ * this for free because they are in the flow. The sheet did not, because it was
+ * a `position: fixed` overlay taken out of the flow, so the window stayed the
+ * height of the view behind it and the sheet clipped rather than growing. Every
+ * earlier fix here was working around that instead of removing it.
+ *
+ * So when a sheet is open it stops being an overlay and becomes the document:
+ * the views and the nav behind it are hidden (see the rule below), and the
+ * sheet sits in the flow as the one visible child. Now the window grows to fit
+ * it exactly as it grows for the tabs view, the nav cannot bleed through
+ * because it is not rendered, and the body only has to scroll in the one case a
+ * view would too, when the content is taller than the 600 pixel ceiling.
+ */
+.sheet-body {
+  max-width: none;
+  width: 100%;
+  max-height: none;
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  padding: 20px var(--gut);
+  gap: 15px;
+  overflow-y: visible;
+}
+
+.sheet-scrim {
+  display: none;
+}
+
+/* The sheet is now an in-flow child of the body's column, not a fixed overlay,
+   so it counts toward the height the window sizes to. flex lets it grow to its
+   content and, once the body hits its 600px cap, shrink and scroll rather than
+   clip. */
+.sheet {
+  position: static;
+  inset: auto;
+  display: block;
+  padding: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* When any sheet is open, everything behind it, the header bar, the views and
+   the nav, steps out of the flow so the document is just the sheet and the
+   window sizes to it. Hidden, not merely covered, which is also why the nav can
+   no longer show through and why the sheet reads as the clean full surface it
+   did when it was an overlay. */
+body:has(.sheet:not([hidden])) > .bar,
+body:has(.sheet:not([hidden])) > .stage-wrap,
+body:has(.sheet:not([hidden])) > .nav,
+body:has(.sheet:not([hidden])) > .diag-link {
+  display: none;
+}
+
+.sheet-body h3 {
+  font-size: 21px;
+}
+
+/* Was capped and scrolling, which is the second nested scroller in the same
+   view. The stage scrolls it now, like everything else in here. */
+.sheet .adopt-list {
+  max-height: none;
+  overflow: visible;
+}
+
+.diag-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px var(--gut) 11px;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--mute-5);
+  background: var(--chrome);
+  border-top: 1px solid var(--hair);
+  flex: none;
+  transition: color 0.16s var(--ease), background 0.16s var(--ease);
+}
+
+.diag-link::before {
+  content: '';
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.diag-link:hover,
+.diag-link:focus-visible {
+  color: var(--signal);
+  background: var(--chalk);
+  outline: none;
+}
+
+/* -------------------------------------------------------------- journal
+
+   A log is scanned rather than read, so the shape does the work: the time is a
+   fixed column on the left, the subsystem and the event sit on one line as the
+   thing that happened, and everything variable drops to a second line where a
+   long hostname cannot push the event out of alignment.
+
+   Level is a stripe rather than a colour on the text. Colouring the words makes
+   an ordinary list look like a wall of errors; a two pixel edge is visible at a
+   glance and disappears when you are reading. */
+
+.journal-rows {
+  max-height: 420px;
+  gap: 1px;
+  background: var(--hair);
+  border: 1px solid var(--hair);
+}
+
+.jrow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 11px 9px 9px;
+  background: var(--lift);
+  border-left: 2px solid transparent;
+}
+
+.jrow--warn {
+  border-left-color: var(--warn);
+}
+
+.jrow--error {
+  border-left-color: var(--alarm);
+  background: color-mix(in srgb, var(--alarm) 6%, var(--lift));
+}
+
+.jrow--debug {
+  color: var(--mute-8);
+}
+
+.jrow-t {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--mute-8);
+  padding-top: 1px;
+}
+
+.jrow-main {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.jrow-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.jrow-area {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mute-8);
+  flex: none;
+}
+
+.jrow-ev {
+  font-size: 12px;
+  color: var(--fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jrow--error .jrow-ev {
+  color: var(--alarm);
+}
+
+.jrow-x {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--signal-mid);
+  flex: none;
+}
+
+.jrow-detail {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--mute-7);
+  overflow-wrap: anywhere;
+}
+
+/* The guide inside the popup borrows guide.css, which the popup loads. Only
+   the mount needs saying here. */
+#guide-mount {
+  margin-top: 4px;
+}
+
+/* ------------------------------------------------------------ the pause
+
+   The off switch sits above the fingerprint block because it is the more
+   consequential of the two and the one somebody arrives here looking for. */
+
+.pause-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.pause-row .btn {
+  min-width: 168px;
+}
+
+/* The note carries its own margin for the contexts it usually sits in, which
+   here lands on top of the row's gap and reads as two unrelated things. */
+.pause-row .note {
+  margin: 0;
+}
+
+.btn--alarm {
+  border-color: rgba(196, 97, 74, 0.5);
+  background: rgba(196, 97, 74, 0.14);
+  color: var(--alarm);
+}
+
+/* A released site: two columns, the domain and the way back. */
+.row--released {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* The paused banner. Alarm coloured on purpose: the extension is not doing the
+   one thing it is for, and that is the only state where saying so loudly is
+   more useful than staying out of the way. */
+.paused-bar {
+  border: 1px solid rgba(196, 97, 74, 0.45);
+  background: rgba(196, 97, 74, 0.12);
+  border-radius: 4px;
+  margin: 12px var(--gut) 0;
+}
+
+.paused-bar .leak-title {
+  color: var(--alarm);
+}
+
+/* --------------------------------------------------- the sign-in sheet
+
+   A colour dot in the heading so the session being signed into is unmistakable,
+   and quick chips for the sites people reach for, though any address works. */
+
+.signin-swatch {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  background: var(--tone, var(--signal));
+  vertical-align: middle;
+  margin: 0 2px;
+}
+
+.sheet-lede {
+  margin: 0 0 4px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--mute-5);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip--btn {
+  border: 1px solid var(--edge-2);
+  border-radius: 999px;
+  background: var(--chalk);
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 5px 11px;
+  cursor: pointer;
+  transition:
+    color 0.18s var(--ease),
+    border-color 0.18s var(--ease),
+    background 0.18s var(--ease);
+}
+.chip--btn:hover,
+.chip--btn:focus-visible {
+  color: var(--fg);
+  border-color: var(--edge-3);
+  background: var(--chalk-2);
+  outline: none;
+}
+
+/* -------------------------------------------------- bulk tab moving
+
+   A tick in the first column and an action bar pinned under the list. The bar
+   is flex, the list scrolls above it, so the move controls never scroll away
+   while you are choosing what to move. */
+
+.row--tab {
+  grid-template-columns: auto 10px minmax(0, 1fr) auto auto;
+  gap: 9px;
+  align-items: center;
+}
+/* Drawn, not native. tokens.css sets appearance: none on every input, which
+   kills the checkbox and its accent-color, and `.field input` (used by the
+   sheet) is more specific than a bare `.tab-check`, so inside the new-session
+   sheet the box also inherited a 36px text-field height. `input.tab-check`
+   matches that specificity and, loaded later, wins: a real 16px box that fills
+   with the signal and shows a tick when checked, everywhere it is used. */
+input.tab-check {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--edge-3);
+  border-radius: 4px;
+  background: var(--chrome);
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  transition:
+    background 0.15s var(--ease),
+    border-color 0.15s var(--ease);
+}
+input.tab-check:hover {
+  border-color: var(--signal);
+}
+input.tab-check:checked {
+  background: var(--signal);
+  border-color: var(--signal);
+}
+input.tab-check:checked::after {
+  content: '';
+  width: 4px;
+  height: 8px;
+  margin-top: -1px;
+  border: solid var(--chrome);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+input.tab-check:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+/* The tab picker in the new-session sheet. Capped and scrolling on its own so a
+   browser full of tabs does not turn the sheet into a mile of list; the sheet
+   stays the height of the form and this one region scrolls. */
+.tab-pick {
+  display: flex;
+  flex-direction: column;
+  max-height: 168px;
+  overflow-y: auto;
+  border: 1px solid var(--edge-2);
+  border-radius: 5px;
+  background: var(--chalk);
+}
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--edge);
+}
+.pick-row:last-child {
+  border-bottom: 0;
+}
+.pick-row:hover {
+  background: var(--chalk-2);
+}
+.pick-body {
+  min-width: 0;
+  flex: 1;
+}
+.pick-name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pick-sub {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--mute-5);
+}
+.move-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px var(--gut);
+  border-top: 1px solid var(--edge);
+  background: var(--chrome);
+}
+.move-left,
+.move-right {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.move-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-3);
+}
+.move-to {
+  height: 30px;
+  border: 1px solid var(--edge-2);
+  border-radius: 4px;
+  background: var(--chalk);
+  color: var(--signal);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+.move-bar .btn {
+  height: 30px;
+  min-width: 0;
+  padding: 0 12px;
+  font-size: 10.5px;
+}
+
+/* The toast lives at the foot of the popup, over the content but under a sheet,
+   so a modal that opens still covers it. It is anchored to the popup box rather
+   than to the scrolling stage, so it holds still while a list moves under it.
+   prefers-reduced-motion gets no slide, only the fade the opacity gives. */
+.toast-host {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  z-index: 18;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 24px);
+  padding: 9px 12px;
+  border: 1px solid var(--edge-2);
+  border-radius: 7px;
+  background: var(--lift);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  animation: toast-in 160ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.toast-msg {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.toast-do {
+  flex: none;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--edge-2);
+  border-radius: 5px;
+  background: var(--chalk);
+  color: var(--signal);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+.toast-do:hover {
+  border-color: var(--signal);
+}
+
+/* The Pro tier block in Settings, section 30.
+
+   It sits on the same --lift surface as the other setting blocks and borrows the
+   button and note vocabulary rather than inventing its own, so it reads as one
+   more setting and not as a storefront bolted on. The one new element is the
+   feature list, where an unlocked row lights its tick in the signal colour and a
+   locked one stays muted, so what you have and what you would get are told apart
+   by weight, not by a badge on every line. */
+.pro-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+  color: var(--mute-3);
+}
+.pro-badge--pro {
+  color: var(--signal);
+  border-color: color-mix(in srgb, var(--signal) 45%, transparent);
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+}
+.pro-badge--tester {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.pro-badge--free {
+  color: var(--mute-5);
+}
+
+.pro {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pro-lead {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--fg-3);
+}
+.pro-note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--mute-5);
+}
+.pro-note--warn {
+  color: var(--warn);
+}
+
+.pro-feats {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pro-feat {
+  display: flex;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  align-items: flex-start;
+}
+.pro-feat.is-on {
+  background: color-mix(in srgb, var(--signal) 7%, transparent);
+}
+.pro-tick {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mute-8);
+}
+.pro-feat.is-on .pro-tick {
+  color: var(--signal);
+}
+.pro-feat-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg-3);
+}
+.pro-feat.is-on .pro-feat-name {
+  color: var(--fg);
+}
+.pro-feat-blurb {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--mute-5);
+  margin-top: 1px;
+}
+
+.pro-acts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pro-form {
+  display: flex;
+  gap: 8px;
+}
+.pro-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--edge);
+  background: var(--chrome);
+  color: var(--fg);
+}
+.pro-input::placeholder {
+  color: var(--mute-8);
+  letter-spacing: 0.08em;
+}
+.pro-input:focus {
+  outline: none;
+  border-color: var(--signal);
+}
+.pro-msg {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--mute-5);
+}
+.pro-msg--warn {
+  color: var(--warn);
+}
+.pro-msg--ok {
+  color: var(--ok);
+}
+
+.pro-transfer {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px;
+  border-radius: 10px;
+  border: 1px solid var(--edge);
+  background: var(--chrome);
+}
+.pro-device {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: var(--chalk);
+}
+.pro-device-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg-3);
+}
+.pro-device-seen {
+  font-size: 10.5px;
+  color: var(--mute-5);
+}
+
+/* A small "Pro" tag on a control that a licence unlocks: the persona posture, the
+   fail-closed toggle. Same signal colour as the Pro badge, sized to sit inline in
+   a segment button or a toggle label without pushing the row taller. */
+.pro-chip {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 999px;
+  color: var(--signal);
+  border: 1px solid color-mix(in srgb, var(--signal) 45%, transparent);
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+  vertical-align: middle;
+}
+
+/* "New account here" on the home hero: the per-tab multi-account move, styled as a
+   quiet, dashed, full-width invitation rather than a loud button, because it sits
+   under the current account and adds to it rather than replacing anything. */
+.here-add {
+  margin-top: 12px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 9px 10px;
+  border-radius: 9px;
+  border: 1px dashed var(--edge-2);
+  background: var(--chalk);
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.here-add:hover:not(:disabled) {
+  border-color: var(--signal);
+  color: var(--fg);
+}
+.here-add:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.here-add-plus {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--signal);
+}
+
+.backup-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* The two per-tab actions side by side. Burner reads a shade quieter than New
+   account, because it is the rarer, more deliberate of the two. */
+.here-adds {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.here-adds .here-add {
+  margin-top: 0;
+  flex: 1;
+  min-width: 0;
+}
+.here-add--burner .here-add-plus {
+  color: var(--mute-3);
+}

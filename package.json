@@ -1,0 +1,30 @@
+{
+  "name": "nvx-session",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Per-tab session isolation kernel for Chromium and Opera GX.",
+  "type": "module",
+  "scripts": {
+    "fixture": "node tools/fixture/server.mjs",
+    "check": "node tools/check.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "node tools/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "e2e": "node tools/e2e.mjs opera",
+    "probe": "node tools/run-probe.mjs",
+    "fixture:stop": "node tools/fixture/stop.mjs",
+    "build:mv2": "node tools/build.mjs --mv2",
+    "native:check": "node tools/native-check.mjs",
+    "native:install": "node native/install.mjs",
+    "native:uninstall": "node native/install.mjs --uninstall"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@types/chrome": "^0.2.6",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}

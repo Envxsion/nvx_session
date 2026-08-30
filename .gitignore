@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-mv2/
+dist-store/
+native/nvx-host.bat
+native/com.nvx.session.json
+.DS_Store
+*.log
+*.zip

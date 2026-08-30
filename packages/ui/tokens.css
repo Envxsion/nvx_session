@@ -1,0 +1,293 @@
+/* ==========================================================================
+   NVX Session design tokens
+
+   Surfaces, type and motion are lifted from the APERTURE system in
+   ~/Documents/GitHub/cyberfolio (read only, never modified). Values match
+   that source exactly so the two never drift.
+
+   Added here and not present in the source: the session identity ramp. The
+   product needs six colours that mean "which account", and they must not
+   compete with signal. Signal stays reserved for system affordance: active
+   state, focus, primary action. Session hues sit well away from its
+   yellow-green and share a luminance band so no session reads as louder
+   than another.
+   ========================================================================== */
+
+:root {
+  --void: #08090a;
+  --void-deep: #030405;
+  --ink: #0c0d0f;
+  --paper: #eff0ea;
+
+  --signal: #dcea4f;
+  --signal-dim: #4e5710;
+  --signal-mid: #a0ae3c;
+  --alarm: #c4614a;
+
+  --fg: #eff0ea;
+  --fg-2: #cfd2d5;
+  --fg-3: #c4c8cc;
+  --fg-4: #b4b8bc;
+  --mute: #9aa0a6;
+  --mute-3: #8a9096;
+  --mute-5: #7c8792;
+  --mute-7: #5c646b;
+  --mute-8: #565c63;
+  --rule: #a6adb4;
+
+  --panel: #14161a;
+  --panel-2: #15181b;
+  --panel-3: #1c2024;
+  --panel-4: #0d0f11;
+  --panel-5: #0b0c0f;
+  --panel-6: #0f1114;
+
+  /* Lift.
+
+     The surfaces above are the portfolio's, and they are all within a few
+     points of black, which is right for a page with a lot of air around the
+     content. A popup is 400 pixels of solid surface with no air at all, and
+     the same values there read as one unbroken black rectangle: nothing looks
+     raised, nothing looks pressable, and every edge disappears.
+
+     So the popup gets its own ladder. Content sits on --lift, which is
+     genuinely lighter than the frame around it, and the chrome recedes to
+     --chrome so the content reads as sitting on top of it rather than being
+     cut out of it. Three steps, far enough apart to survive a dim screen. */
+  --lift: #12151b;
+  --lift-2: #171b22;
+  --lift-3: #1d222a;
+  --chrome: #0a0b0e;
+
+  --hair: rgba(239, 240, 234, 0.1);
+  --hair-2: rgba(239, 240, 234, 0.16);
+  --hair-3: rgba(239, 240, 234, 0.22);
+  --wash: rgba(239, 240, 234, 0.02);
+  --wash-2: rgba(239, 240, 234, 0.045);
+
+  /* Edges, which the hairlines above are too faint to be at popup scale. A
+     border at 0.1 alpha on a near-black surface is invisible on anything but a
+     good monitor at full brightness, and a control nobody can see the edge of
+     is a control nobody presses. */
+  --edge: rgba(239, 240, 234, 0.16);
+  --edge-2: rgba(239, 240, 234, 0.26);
+  --edge-3: rgba(239, 240, 234, 0.42);
+
+  /* White, used as a material rather than only as text. A light fill on a
+     chip or an active control is what keeps the surface from reading as
+     uniformly black. */
+  --chalk: rgba(239, 240, 234, 0.07);
+  --chalk-2: rgba(239, 240, 234, 0.12);
+  --chalk-3: rgba(239, 240, 234, 0.2);
+
+  --ok: #7bc96f;
+  --warn: #d8a13c;
+  --fail: #c4614a;
+  --unknown: #5c646b;
+
+  /* The identity ramp. Eight, not six, and spread around the wheel rather
+     than clustered in the cool half, because two sessions the user cannot
+     tell apart at a glance is the same failure as no colour at all. Chalk is
+     deliberately not a hue: a neutral reads as distinct from all seven of the
+     others under any kind of colour blindness. */
+  --s-coral: #ef6f52;
+  --s-amber: #eca93a;
+  --s-jade: #3fcf8e;
+  --s-cyan: #4fd6ea;
+  --s-azure: #5a8cf0;
+  --s-violet: #9a7bf5;
+  --s-magenta: #e56ec4;
+  --s-chalk: #dfe4ec;
+
+  --font-display: 'Bodoni Moda', 'Didot', 'Playfair Display', Georgia, serif;
+  --font-sans: 'Familjen Grotesk', system-ui, 'Segoe UI', sans-serif;
+  --font-mono: 'Martian Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+
+  --ease: cubic-bezier(0.19, 1, 0.22, 1);
+  --ease-shake: cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--void);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--signal);
+  color: var(--void);
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 3px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  outline: none;
+  padding: 0;
+  border-radius: 0;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+input::placeholder {
+  color: rgba(239, 240, 234, 0.26);
+}
+
+/* --------------------------------------------------------------------------
+   Scroll
+
+   The platform scrollbar is a grey slab that breaks whatever surface it sits
+   on. This is a thin inset rail that reads as part of the panel and warms to
+   signal on hover. The inset comes from background-clip plus a transparent
+   border; without both, the thumb spans the full gutter and reads as a bar.
+
+   Modals get no scrollbar at all. In-page regions keep one, because a region
+   that scrolls invisibly is a region nobody discovers.
+   -------------------------------------------------------------------------- */
+
+[data-scrollable] {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--hair-2) transparent;
+}
+
+[data-scrollable]::-webkit-scrollbar {
+  width: 9px;
+}
+
+[data-scrollable]::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+[data-scrollable]::-webkit-scrollbar-thumb {
+  background: var(--hair-2);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+
+[data-scrollable]::-webkit-scrollbar-thumb:hover {
+  background: rgba(220, 234, 79, 0.5);
+  background-clip: content-box;
+}
+
+[data-quietscroll] {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+[data-quietscroll]::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Type roles
+   -------------------------------------------------------------------------- */
+
+[data-label] {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mute-8);
+}
+
+[data-title] {
+  font-family: var(--font-display);
+  letter-spacing: -0.008em;
+  color: var(--fg);
+}
+
+[data-num] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   Motion
+   -------------------------------------------------------------------------- */
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.972) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes wipe {
+  0% {
+    transform: translateX(-130%);
+  }
+  100% {
+    transform: translateX(130%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

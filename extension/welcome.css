@@ -1,0 +1,488 @@
+/* ==========================================================================
+   The setup screen.
+
+   Two columns on anything wide enough: the proposal on the left, what pressing
+   the button means on the right. The right column is not decoration. This
+   screen asks somebody to hand their signed-in accounts to software they
+   installed four seconds ago, and the answer to "what is about to happen to my
+   browser" has to be on screen at the moment they decide rather than a link
+   away.
+   ========================================================================== */
+
+.wrap--wide {
+  max-width: 1180px;
+}
+
+.wel-hero {
+  padding: 60px 0 34px;
+}
+
+.wel-hero h1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(36px, 5.4vw, 62px);
+  line-height: 1.02;
+  letter-spacing: -0.022em;
+  margin: 12px 0 18px;
+  text-wrap: balance;
+}
+
+.wel-lede {
+  max-width: 64ch;
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.wel-lede b {
+  color: var(--signal);
+  font-weight: 400;
+}
+
+/* ------------------------------------------------------------------ strip */
+
+.wel-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 30px;
+  margin-top: 30px;
+  padding-top: 22px;
+  border-top: 1px solid var(--hair);
+}
+
+.wel-stat {
+  display: grid;
+  gap: 3px;
+}
+
+.wel-stat-v {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  line-height: 1;
+}
+
+.wel-stat-l {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mute-8);
+}
+
+/* ----------------------------------------------------------------- layout */
+
+.wel-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 30px;
+  align-items: start;
+  padding-bottom: 70px;
+}
+
+@media (min-width: 940px) {
+  .wel-main {
+    grid-template-columns: minmax(0, 1fr) 330px;
+  }
+
+  .wel-side {
+    position: sticky;
+    top: 28px;
+  }
+}
+
+/* ------------------------------------------------------------------- list */
+
+.wel-list {
+  max-height: min(56vh, 620px);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--hair);
+  border: 1px solid var(--edge);
+}
+
+.wel-row {
+  display: grid;
+  grid-template-columns: auto 10px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 15px 17px;
+  background: var(--panel-4);
+  cursor: pointer;
+  transition:
+    background 0.16s var(--ease),
+    box-shadow 0.16s var(--ease);
+}
+
+.wel-row:hover {
+  background: var(--panel-3);
+}
+
+.wel-row.is-on {
+  background: var(--panel-3);
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+
+.wel-row--over {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.wel-check {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--edge-2);
+  background: var(--void);
+  display: grid;
+  place-content: center;
+  cursor: inherit;
+  transition:
+    border-color 0.16s var(--ease),
+    background 0.16s var(--ease);
+}
+
+.wel-check:checked {
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.wel-check:checked::after {
+  content: '';
+  width: 4px;
+  height: 8px;
+  border: solid var(--void);
+  border-width: 0 2px 2px 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+
+.wel-check:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.wel-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--dot-tone, var(--mute-5));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot-tone, var(--mute-5)) 22%, transparent);
+}
+
+.wel-main-col {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.wel-name {
+  font-family: var(--font-display);
+  font-size: 17px;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wel-sites {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--mute-7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wel-marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+.wel-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px 6px;
+  border: 1px solid var(--hair-2);
+  color: var(--mute-5);
+}
+
+.wel-badge--ok {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+}
+
+.wel-badge--live {
+  color: var(--signal);
+  border-color: var(--signal-dim);
+}
+
+.wel-badge--warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+}
+
+.wel-count {
+  display: grid;
+  justify-items: end;
+  gap: 1px;
+}
+
+.wel-num {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-3);
+}
+
+.wel-unit {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mute-8);
+}
+
+.wel-none {
+  padding: 34px 20px;
+  background: var(--panel-4);
+}
+
+.wel-none p {
+  max-width: 56ch;
+  margin: 0 0 10px;
+  color: var(--mute);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+/* ------------------------------------------------------------------- side */
+
+.wel-card {
+  border: 1px solid var(--edge);
+  background: var(--panel-4);
+  padding: 20px;
+  margin-bottom: 14px;
+}
+
+.wel-card h3 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: 17px;
+  margin: 0 0 14px;
+  color: var(--fg);
+}
+
+.wel-card--quiet {
+  background: var(--wash);
+}
+
+.wel-card--quiet p {
+  margin: 0;
+  color: var(--mute-5);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+.wel-card--quiet b {
+  color: var(--fg-3);
+  font-weight: 400;
+}
+
+.wel-num-list,
+.wel-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.wel-num-list {
+  margin: 0;
+}
+
+ol.wel-num {
+  counter-reset: step;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 15px;
+  font-size: inherit;
+  font-family: inherit;
+  color: inherit;
+}
+
+ol.wel-num li {
+  display: grid;
+  gap: 3px;
+  padding-left: 26px;
+  position: relative;
+}
+
+ol.wel-num li::before {
+  counter-increment: step;
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-content: center;
+  border: 1px solid var(--signal-dim);
+  color: var(--signal-mid);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+ol.wel-num b {
+  font-weight: 400;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+
+ol.wel-num span {
+  color: var(--mute);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* ---------------------------------------------------------------- actions */
+
+.wel-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.wel-actions--row {
+  grid-auto-flow: column;
+  justify-content: start;
+}
+
+.wel-meter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  min-height: 15px;
+}
+
+.wel-meter-sep {
+  color: var(--mute-8);
+}
+
+.wel-meter-quiet {
+  color: var(--mute-8);
+}
+
+/* Height rather than vertical padding. The base is a fixed height flex box, so
+   padding here fought it and left the label sitting low in the button. */
+.btn--big {
+  height: 46px;
+  padding: 0 24px;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-indent: 0.16em;
+}
+
+/* ------------------------------------------------------------------- done */
+
+.wel-done {
+  padding: 8px 0 90px;
+  animation: rise 0.34s var(--ease) both;
+}
+
+.wel-done h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(28px, 4vw, 42px);
+  margin: 0 0 20px;
+}
+
+.wel-result {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: var(--hair);
+  border: 1px solid var(--edge);
+  max-width: 720px;
+}
+
+.wel-done-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 14px 17px;
+  background: var(--panel-4);
+}
+
+.wel-done-row--bad .wel-done-name {
+  color: var(--alarm);
+}
+
+.wel-done-name {
+  font-family: var(--font-display);
+  font-size: 16px;
+  color: var(--fg);
+}
+
+.wel-done-detail {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mute-5);
+  text-align: right;
+}
+
+.wel-result .note {
+  background: var(--panel-4);
+  padding: 16px 17px;
+  margin: 0;
+  max-width: none;
+}
+
+/* ------------------------------------------------- the list heading
+
+   Four dense controls beside a title leaves the title nothing, and a flex
+   child with `flex: 1` shrinks to its longest word rather than clipping: the
+   heading came out stacked one word per line beside a tidy row of buttons.
+   Wrapping puts the title on its own line and gives the controls the next one,
+   which is the same treatment the popup's heads take for the same reason. */
+
+.wel-list-block .block-head {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+
+.wel-list-block .block-head > h2 {
+  flex: 1 0 100%;
+}
+
+.wel-list-block .head-actions--dense {
+  flex: 1 1 100%;
+  justify-content: flex-start;
+}
+
+/* The one caution on the setup screen. Amber, because it is not a warning about
+   something going wrong now, it is a heads-up about the one way this can. */
+.wel-card--warn {
+  border-color: rgba(196, 97, 74, 0.4);
+  background: rgba(196, 97, 74, 0.08);
+}
+.wel-card--warn h3 {
+  color: var(--alarm);
+}

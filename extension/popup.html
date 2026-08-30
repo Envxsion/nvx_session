@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>NVX Session</title>
+    <link rel="stylesheet" href="ui/tokens.css" />
+    <link rel="stylesheet" href="panel.css" />
+    <link rel="stylesheet" href="guide.css" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body data-view="home">
+    <header class="bar">
+      <button class="back" id="back" type="button" hidden aria-label="Back">&#8249;</button>
+      <span class="mark" id="mark" aria-hidden="true"></span>
+      <span class="wordmark" id="crumb">NVX</span>
+      <span class="host" id="host"></span>
+    </header>
+
+    <div class="stage-wrap">
+    <main class="stage" data-scrollable id="stage">
+      <div class="view" data-view="home">
+        <section class="paused-bar" id="paused" hidden></section>
+        <section class="leak leak--caution" id="caution" hidden></section>
+        <section class="leak leak--consent" id="consent" hidden></section>
+        <section class="leak leak--moved" id="moved" hidden></section>
+        <section class="leak leak--loop" id="loop" hidden></section>
+        <section class="leak" id="leak" hidden></section>
+
+        <section class="here" id="here">
+          <div class="here-skeleton" data-label>reading this tab</div>
+        </section>
+
+        <section class="moveto" id="switch-block" hidden>
+          <p class="lede" id="switch-lede" data-label>move this tab to</p>
+          <div class="list" id="list"></div>
+        </section>
+
+        <section class="health" id="health" hidden></section>
+      </div>
+
+    <div class="view" data-view="sessions" hidden>
+      <section class="block">
+        <div class="block-head">
+          <h2>Sessions</h2>
+          <div class="head-actions">
+            <button class="btn btn--quiet" id="setup-again" type="button">Set up from profile</button>
+            <button class="btn" id="adopt" type="button">Adopt existing</button>
+            <button class="btn btn--primary" id="new-session" type="button">New session</button>
+          </div>
+        </div>
+        <div class="rows" data-scrollable id="sessions">
+          <p class="empty">NO SESSIONS YET</p>
+        </div>
+      </section>
+    </div>
+    <div class="view" data-view="tabs" hidden>
+      <section class="block">
+        <div class="block-head">
+          <h2>Tabs</h2>
+          <button class="btn" id="refresh" type="button">Refresh</button>
+        </div>
+        <div class="rows" data-scrollable id="tabs">
+          <p class="empty">LOADING</p>
+        </div>
+        <div class="move-bar" id="tab-move" hidden></div>
+      </section>
+    </div>
+    <div class="view" data-view="trail" hidden>
+      <section class="block">
+        <div class="block-head">
+          <h2>Blast radius</h2>
+          <div class="head-actions">
+            <button class="btn" id="audit-refresh" type="button">Re-check</button>
+            <button class="btn btn--quiet btn--danger" id="audit-clear" type="button">
+              Clear trail
+            </button>
+          </div>
+        </div>
+        <div class="rows" data-scrollable id="audit"></div>
+        <p class="note" id="audit-note"></p>
+      </section>
+    </div>
+    <div class="view" data-view="parties" hidden>
+      <section class="block">
+        <div class="block-head">
+          <h2>Third parties</h2>
+          <div class="head-actions">
+            <button class="btn btn--quiet btn--danger" id="tp-clear" type="button">
+              Clear list
+            </button>
+          </div>
+        </div>
+        <p class="note note--lead">
+          Who else was on the pages your sessions visited, and which site pulled them
+          in. A tracker handed the same identifier from every session makes two
+          separated accounts one person to anyone counting.
+        </p>
+        <div class="rows" data-scrollable id="thirdparty"></div>
+        <p class="note" id="tp-note"></p>
+      </section>
+    </div>
+    <div class="view" data-view="storage" hidden>
+      <section class="block">
+        <div class="block-head">
+          <h2>Web storage</h2>
+          <button class="btn" id="storage-refresh" type="button">Re-check</button>
+        </div>
+        <div class="rows" id="storage"></div>
+        <p class="note" id="storage-note"></p>
+      </section>
+    </div>
+    <div class="view" data-view="settings" hidden>
+      <section class="block" id="pro-block" hidden>
+        <div class="block-head">
+          <h2>Pro</h2>
+          <span class="pro-badge" id="pro-badge" hidden></span>
+        </div>
+        <div class="pro" id="pro"></div>
+      </section>
+
+      <section class="block" id="sync-block" hidden>
+        <div class="block-head">
+          <h2>Sync</h2>
+          <span class="pro-chip" id="sync-chip" hidden>Pro</span>
+        </div>
+        <div class="pro" id="sync"></div>
+      </section>
+
+      <section class="block">
+        <div class="block-head">
+          <h2>Isolation</h2>
+        </div>
+        <div class="field">
+          <div class="pause-row">
+            <button class="btn" id="pause" type="button" aria-pressed="false">Pause everything</button>
+            <p class="note" id="pause-note"></p>
+          </div>
+        </div>
+        <div class="rows" id="failclosed" hidden></div>
+        <div class="rows" id="cacheisolation" hidden></div>
+        <div class="rows" id="released"></div>
+        <p class="note" id="released-note"></p>
+      </section>
+
+      <section class="block">
+        <div class="block-head">
+          <h2>Fingerprint</h2>
+        </div>
+        <div class="field posture-field">
+          <div class="seg" id="posture" role="radiogroup" aria-label="Fingerprint posture"></div>
+          <p class="seg-note" id="posture-note"></p>
+        </div>
+        <div class="rows" id="surfaces"></div>
+      </section>
+
+      <section class="block">
+        <div class="block-head">
+          <h2>Identity channels</h2>
+        </div>
+        <div class="channels" id="channels"></div>
+        <p class="note" id="channel-note"></p>
+      </section>
+    </div>
+    <div class="view" data-view="journal" hidden>
+      <section class="block">
+        <div class="block-head">
+          <h2>Journal</h2>
+          <div class="head-actions head-actions--dense">
+            <button class="btn" id="journal-refresh" type="button">Refresh</button>
+            <button class="btn" id="journal-export" type="button">Export</button>
+            <button class="btn btn--quiet btn--danger" id="journal-clear" type="button">
+              Clear
+            </button>
+          </div>
+        </div>
+        <p class="note note--lead">
+          What this extension did, kept on disk so the answer is still here
+          tomorrow. No cookie values, no storage values, no query strings and no
+          request bodies are ever written down.
+        </p>
+        <div class="field">
+          <span data-label>Record</span>
+          <div class="seg" id="loglevel" role="radiogroup" aria-label="How much to record"></div>
+          <p class="seg-note" id="loglevel-note"></p>
+        </div>
+        <div class="rows journal-rows" data-scrollable id="journal"></div>
+        <p class="note" id="journal-note"></p>
+      </section>
+    </div>
+    <div class="view" data-view="guide" hidden>
+      <section class="block">
+        <div class="block-head">
+          <h2>Guide</h2>
+          <button class="btn" id="guide-full" type="button">Open full page</button>
+        </div>
+        <p class="note note--lead">
+          Every feature, in the fewest words that are still true. Open a chapter
+          to read it, or take the whole thing full width in a tab.
+        </p>
+        <div id="guide-mount"></div>
+      </section>
+    </div>
+    <div class="view" data-view="native" hidden>
+      <section class="block">
+        <div class="block-head">
+          <h2>Native host</h2>
+          <button class="btn" id="native-refresh" type="button">Re-check</button>
+        </div>
+        <div class="rows" id="native"></div>
+      </section>
+    </div>
+    </main>
+    </div>
+
+    <!--
+      Two rows of four rather than one row of eight.
+
+      Eight cells across 400 pixels is fifty pixels each, which forces the label
+      to eight point type and still clips "Settings". Two rows doubles the cell
+      and lets the type come back up to something readable, and the popup is
+      tall enough to afford the twenty pixels it costs.
+    -->
+    <nav class="nav" id="nav">
+        <button class="nav-b" data-go="sessions" type="button">Sessions</button>
+        <button class="nav-b" data-go="tabs" type="button">Tabs</button>
+        <button class="nav-b" data-go="trail" type="button">Trail</button>
+        <button class="nav-b" data-go="parties" type="button">Parties</button>
+        <button class="nav-b" data-go="storage" type="button">Storage</button>
+        <button class="nav-b" data-go="settings" type="button">Settings</button>
+        <button class="nav-b" data-go="journal" type="button">Journal</button>
+        <button class="nav-b" data-go="guide" type="button">Guide</button>
+    </nav>
+
+    <button class="diag-link" type="button">Diagnostics and self tests</button>
+
+    <div class="sheet" id="sheet" hidden>
+      <button class="sheet-scrim" id="sheet-close" type="button" tabindex="-1" aria-label="Cancel"></button>
+      <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+        <h3 id="sheet-title">New session</h3>
+        <label class="field">
+          <span data-label>Label</span>
+          <input id="new-label" type="text" placeholder="work" autocomplete="off" />
+        </label>
+        <div class="field">
+          <span data-label>Add open tabs</span>
+          <div class="tab-pick" id="new-tabs"></div>
+        </div>
+        <label class="field">
+          <span data-label>Or pin a domain, comma separated</span>
+          <input id="new-pinned" type="text" placeholder="vercel.com, github.com" autocomplete="off" />
+        </label>
+        <div class="swatches" id="new-colors" role="radiogroup" aria-label="Session colour"></div>
+        <div class="field">
+          <span data-label>Blast radius</span>
+          <div class="seg" id="new-danger" role="radiogroup" aria-label="Blast radius"></div>
+          <p class="seg-note" id="new-danger-note"></p>
+        </div>
+        <div class="sheet-actions">
+          <button class="btn" id="sheet-cancel" type="button">Cancel</button>
+          <button class="btn btn--primary" id="sheet-create" type="button">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sheet" id="signin-sheet" hidden>
+      <button class="sheet-scrim" id="signin-close" type="button" tabindex="-1" aria-label="Cancel"></button>
+      <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="signin-title">
+        <h3 id="signin-title">
+          Sign in as <span class="signin-swatch" id="signin-swatch"></span><span id="signin-for">this session</span>
+        </h3>
+        <p class="sheet-lede">
+          This opens the site in a fresh tab that is already in this session, so you sign in
+          normally and this session remembers only that account. The account you use anywhere else
+          is not touched. This is the safe way to add a Google account: sign in fresh rather than
+          copying one in.
+        </p>
+        <label class="field">
+          <span data-label>Which site</span>
+          <input id="signin-url" type="text" placeholder="gmail.com" autocomplete="off" spellcheck="false" />
+        </label>
+        <div class="chips" aria-label="Common sites">
+          <button class="chip chip--btn" type="button" data-signin-site="gmail.com">Gmail</button>
+          <button class="chip chip--btn" type="button" data-signin-site="accounts.google.com">Google</button>
+          <button class="chip chip--btn" type="button" data-signin-site="github.com">GitHub</button>
+          <button class="chip chip--btn" type="button" data-signin-site="login.microsoftonline.com">Microsoft</button>
+        </div>
+        <div class="sheet-actions">
+          <button class="btn" id="signin-cancel" type="button">Cancel</button>
+          <button class="btn btn--primary" id="signin-go" type="button">Open and sign in</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sheet" id="edit-sheet" hidden>
+      <button class="sheet-scrim" id="edit-close" type="button" tabindex="-1" aria-label="Cancel"></button>
+      <div class="sheet-body" role="dialog" aria-modal="true" aria-labelledby="edit-title">
+        <h3 id="edit-title">Edit session</h3>
+        <label class="field">
+          <span data-label>Label</span>
+          <input id="edit-label" type="text" autocomplete="off" />
+        </label>
+        <div class="field">
+          <span data-label>Add open tabs</span>
+          <div class="tab-pick" id="edit-tabs"></div>
+        </div>
+        <label class="field">
+          <span data-label>Or pin a domain, comma separated</span>
+          <input id="edit-pinned" type="text" autocomplete="off" />
+        </label>
+        <div class="swatches" id="edit-colors" role="radiogroup" aria-label="Session colour"></div>
+        <div class="field">
+          <span data-label>Blast radius</span>
+          <div class="seg" id="edit-danger" role="radiogroup" aria-label="Blast radius"></div>
+          <p class="seg-note" id="edit-danger-note"></p>
+        </div>
+        <div class="field">
+          <span data-label>Backup</span>
+          <div class="backup-row">
+            <button class="btn" id="edit-export" type="button">Export cookies</button>
+            <button class="btn" id="edit-import" type="button">Import</button>
+            <input id="edit-file" type="file" accept="application/json,.json" hidden />
+          </div>
+          <p class="seg-note" id="edit-backup-note">
+            Saves this session's cookies to a file, or restores one. A backup holds
+            live logins, so keep it safe. A device-bound login (a modern Google
+            account) will not work on another machine even from a backup.
+          </p>
+        </div>
+        <div class="sheet-actions">
+          <button class="btn" id="edit-cancel" type="button">Cancel</button>
+          <button class="btn btn--primary" id="edit-save" type="button">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sheet" id="adopt-sheet" hidden>
+      <button class="sheet-scrim" id="adopt-close" type="button" tabindex="-1" aria-label="Cancel"></button>
+      <div
+        class="sheet-body sheet-body--wide"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="adopt-title"
+      >
+        <div class="sheet-head">
+          <h3 id="adopt-title">Adopt what you are signed into</h3>
+          <p class="note">
+            Everything the browser is already carrying, read from this profile.
+            Cookies are copied, never moved, so the tabs you have open keep
+            working exactly as they do now.
+          </p>
+          <p class="note note--warn">
+            For an account you also keep using in your normal browser, Google most of all,
+            <b>Sign in here</b> on a session is safer than adopting: it signs in fresh instead of
+            copying a login that a big provider can read as stolen. See the guide.
+          </p>
+        </div>
+
+        <div class="tools">
+          <input id="adopt-filter" type="search" placeholder="Filter sites" autocomplete="off" />
+          <button class="btn btn--quiet" id="adopt-signed" type="button">Select signed in</button>
+          <button class="btn btn--quiet" id="adopt-clear" type="button">Clear</button>
+        </div>
+
+        <div class="rows adopt-list" data-scrollable id="adopt-list">
+          <p class="empty">READING THE PROFILE JAR</p>
+        </div>
+
+        <div class="adopt-foot">
+          <label class="field">
+            <span data-label>Session name</span>
+            <input id="adopt-label" type="text" autocomplete="off" />
+          </label>
+          <div class="swatches" id="adopt-colors" role="radiogroup" aria-label="Session colour"></div>
+          <div class="toggle-row">
+            <button class="switch" id="adopt-bind" type="button" role="switch" aria-checked="true">
+              <span class="knob"></span>
+            </button>
+            <span class="toggle-label">Move tabs already open on these sites into the session</span>
+          </div>
+          <div class="meter" id="adopt-meter"></div>
+        </div>
+
+        <div class="sheet-actions">
+          <button class="btn" id="adopt-cancel" type="button">Cancel</button>
+          <button class="btn btn--primary" id="adopt-create" type="button" disabled>
+            Create session
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="base.js"></script>
+    <script src="panel.js"></script>
+    <script src="guide-data.js"></script>
+    <script src="guide.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

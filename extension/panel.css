@@ -1,0 +1,1083 @@
+/* The shared component sheet.
+
+   Two surfaces load this: the toolbar popup, which is the product, and the
+   diagnostics page, which is the one thing that could not fold into a popup.
+   They are wildly different shapes, so the rule here is that nothing in this
+   file may assume a page.
+
+   That was not true before and it broke the popup badly. Rows carried two
+   pixels of horizontal padding because a page wrapper 30 pixels wide sat
+   around them; lists carried max-height: 44vh because a page scrolls as a
+   whole; and a max-width: 620px block collapsed every row grid into a stack,
+   which the popup triggered permanently by being 560 pixels wide. All three
+   are now scoped to .wrap, which only the page has.
+
+   The gutter is the mechanism. Each surface declares --gut once and every
+   component pads itself by it, so a row can never touch an edge again. */
+
+body {
+  --gut: 2px;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(120% 70% at 50% -12%, rgba(220, 234, 79, 0.045), transparent 62%),
+    radial-gradient(rgba(239, 240, 234, 0.02) 0.9px, transparent 0.9px);
+  background-size: auto, 7px 7px;
+}
+
+/* ------------------------------------------------------------------ page */
+
+.wrap {
+  position: relative;
+  z-index: 1;
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 52px 30px 96px;
+}
+
+.head {
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--hair);
+  margin-bottom: 34px;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  color: var(--signal);
+  margin: 0 0 16px;
+}
+
+h1 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: clamp(30px, 4.4vw, 44px);
+  line-height: 1.04;
+  letter-spacing: -0.014em;
+  margin: 0 0 20px;
+}
+
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 26px;
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--mute-5);
+}
+.strip b {
+  color: var(--mute-8);
+  font-weight: 300;
+  margin-right: 7px;
+}
+.strip span.v {
+  color: var(--fg-2);
+}
+.strip span.good {
+  color: var(--ok);
+}
+.strip span.bad {
+  color: var(--fail);
+}
+
+/* ----------------------------------------------------------------- block */
+
+.wrap .block {
+  margin-top: 40px;
+}
+
+.block-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 var(--gut) 12px;
+  border-bottom: 1px solid var(--edge);
+}
+.block-head h2 {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+.head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+/* Six actions in one head. The fixed minimum that makes two or three buttons
+   look deliberate makes six of them wrap, and a lone button on a second row
+   reads as an accident rather than as a separate kind of action. */
+.head-actions--dense .btn {
+  min-width: 0;
+  padding: 0 14px;
+}
+
+.note {
+  margin: 14px 0 0;
+  padding: 0 var(--gut);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--mute-5);
+  max-width: 68ch;
+}
+.note code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--fg-2);
+  background: var(--chalk);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+  /**
+   * Centred by the box rather than by the text, for two reasons that were both
+   * live.
+   *
+   * A button's default centring is done by the anonymous line box inside it, so
+   * anything that changes the content box, a modifier adding vertical padding
+   * to a fixed height, pushes the label off centre instead of growing the
+   * button. `.btn--big` did exactly that: 14 pixels of padding inside a 32
+   * pixel height, and the label sat low.
+   *
+   * And letter-spacing is applied after every character including the last, so
+   * a centred tracked label carries one space of trailing air on its right and
+   * reads shifted left by half of it. The text-indent below is that same space
+   * put back on the front, which is the standard correction and the reason
+   * every tracked label in here now sits where it looks like it should.
+   */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  min-width: 112px;
+  padding: 0 15px;
+  border: 1px solid var(--edge-2);
+  border-radius: 4px;
+  background: var(--chalk);
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-indent: 0.14em;
+  text-transform: uppercase;
+  /* The row of diagnostics buttons wraps as a row rather than inside a label:
+     a button reading "ISOLATION" over "TEST" looks like two controls. */
+  white-space: nowrap;
+  color: var(--fg-2);
+  transition:
+    border-color 0.24s var(--ease),
+    color 0.24s var(--ease),
+    background 0.24s var(--ease),
+    transform 0.1s var(--ease);
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--signal);
+  color: var(--signal);
+  background: rgba(220, 234, 79, 0.08);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.btn:disabled {
+  opacity: 0.34;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: var(--void);
+  font-weight: 500;
+}
+.btn--primary:hover:not(:disabled) {
+  background: #e7f36e;
+  border-color: #e7f36e;
+  color: var(--void);
+}
+
+/* Quiet, not disabled. A transparent fill with a 0.1 alpha border reads as a
+   control that cannot be pressed, which is exactly what these are not: Edit,
+   Delete and Choose are the most-used controls in the whole surface. They keep
+   a real fill and a real edge, and only give up size and weight. */
+.btn--quiet {
+  min-width: 0;
+  height: 27px;
+  padding: 0 11px;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  border-color: var(--edge);
+  color: var(--fg-3);
+  background: var(--chalk);
+}
+.btn--quiet:hover:not(:disabled) {
+  border-color: var(--signal);
+  color: var(--signal);
+  background: rgba(220, 234, 79, 0.08);
+}
+
+/* Destructive, so it warms to the alarm colour rather than to signal. Signal
+   means "this is the thing to press"; nothing that deletes should say that. */
+.btn--danger:hover:not(:disabled) {
+  border-color: var(--fail);
+  color: var(--fail);
+  background: rgba(196, 97, 74, 0.1);
+}
+
+/* ------------------------------------------------------------------ rows */
+
+.wrap .rows {
+  max-height: 44vh;
+  margin-top: 4px;
+  padding-right: 4px;
+}
+
+.row {
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  padding: 12px var(--gut);
+  border-bottom: 1px solid var(--hair);
+  animation: rise 0.36s var(--ease) both;
+  transition: background 0.18s var(--ease);
+}
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row--session {
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'dot body meta'
+    '.   body actions';
+}
+.row--session > .dot {
+  grid-area: dot;
+  align-self: start;
+  margin-top: 5px;
+}
+.row--session > .row-body {
+  grid-area: body;
+}
+.row--session > .count {
+  grid-area: meta;
+  align-self: start;
+}
+.row--session > .row-actions,
+.row--session > .tag--system {
+  grid-area: actions;
+  align-self: end;
+  justify-self: end;
+}
+.row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---------------------------------------------------------------- arming
+
+   A session row waiting for the second press of a delete. It takes the alarm
+   colour rather than a highlight, because the state it is in is not "selected",
+   it is "one press from destroying a jar with no undo". */
+
+.row--session.arming {
+  background: rgba(196, 97, 74, 0.09);
+  box-shadow: inset 2px 0 0 var(--alarm);
+}
+
+/* Filled, not outlined. Every other button in this row is quiet, and the one
+   irreversible control in the whole surface should not look like them. */
+.btn--confirm {
+  background: var(--alarm);
+  border-color: var(--alarm);
+  color: var(--fg);
+}
+.btn--confirm:hover:not(:disabled) {
+  background: #d06d54;
+  border-color: #d06d54;
+  color: var(--fg);
+}
+
+/* The picker is a fixed column rather than an auto one. Auto sizes to the
+   longest session name in the list, so adding a session called "client
+   production" silently shrinks the title column of every row. */
+.row--tab {
+  grid-template-columns: 10px minmax(0, 1fr) auto 132px;
+}
+.row--check {
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+}
+.row--adopt {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 11px var(--gut);
+}
+
+.dot {
+  --dot-tone: var(--mute-5);
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--dot-tone);
+  /* A ring of its own colour at low alpha. Nine pixels of flat fill on a dark
+     surface reads as a speck; the halo gives it presence without taking more
+     of the row. */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--dot-tone) 18%, transparent);
+}
+
+.name {
+  font-family: var(--font-display);
+  font-size: 17px;
+  letter-spacing: -0.006em;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sub {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--mute-5);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A url in a tab row should stay on one line; a hint carrying the command that
+   fixes the thing must not, because the ellipsis lands exactly on it. */
+/* Learned rather than configured, so it reads as an observation. The signal
+   tint separates it from the pinned line above without competing with it. */
+.sub--learned {
+  color: var(--signal-mid);
+  opacity: 0.9;
+}
+
+.sub--wrap {
+  white-space: normal;
+  overflow: visible;
+  line-height: 1.65;
+  max-width: 76ch;
+}
+
+/* What deleting this session actually costs, shown in the row it costs it in.
+   It has to sit here rather than beside the arming rules it belongs with,
+   because .sub sets nowrap and an ellipsis, and a warning whose last clause is
+   "cannot be undone" is the one line in the product that must not be truncated
+   to fit. */
+.sub--cost {
+  color: var(--alarm);
+  white-space: normal;
+  overflow: visible;
+  line-height: 1.6;
+}
+
+/* A count is data, not prose, so it gets the light chip rather than being one
+   more line of grey text in a column of grey text. */
+.count {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  color: var(--fg-3);
+  background: var(--chalk);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 3px 7px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The chevron is drawn rather than inherited. tokens.css sets appearance: none
+   on every control so nothing renders as a platform widget, which also removes
+   the arrow, and a select with no arrow is a text field as far as anybody
+   looking at it is concerned. */
+select {
+  height: 28px;
+  width: 100%;
+  padding: 0 24px 0 9px;
+  border: 1px solid var(--edge-2);
+  border-radius: 4px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23c4c8cc' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E")
+      no-repeat right 8px center / 9px 6px,
+    var(--lift-2);
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: border-color 0.24s var(--ease);
+}
+select:hover {
+  border-color: var(--signal);
+}
+option {
+  background: var(--panel);
+  color: var(--fg);
+}
+
+.check-mark {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--fg-4);
+}
+.pass .check-mark {
+  color: var(--ok);
+}
+.fail .check-mark {
+  color: var(--fail);
+}
+.pass .dot {
+  --dot-tone: var(--ok);
+}
+.fail .dot {
+  --dot-tone: var(--fail);
+}
+/* Neither passing nor failing: a fact about the site that the user should know
+   and that nothing here can change. Amber rather than red, because the site is
+   not doing anything wrong and neither is this. */
+.warn .dot {
+  --dot-tone: var(--alarm);
+}
+.check-name {
+  font-size: 13.5px;
+  color: var(--fg-2);
+  line-height: 1.5;
+}
+
+.empty {
+  padding: 30px var(--gut);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--mute-7);
+}
+
+.banner {
+  margin: 14px var(--gut) 0;
+  padding: 13px 16px;
+  border-left: 2px solid var(--fail);
+  background: rgba(196, 97, 74, 0.1);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--fg-2);
+}
+
+/* ----------------------------------------------------------------- sheet */
+
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 14vh 24px 24px;
+}
+.sheet[hidden] {
+  display: none;
+}
+
+.sheet-scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(3, 4, 5, 0.78);
+  backdrop-filter: blur(10px);
+}
+
+.sheet-body {
+  position: relative;
+  width: min(460px, 94vw);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 26px;
+  background: var(--lift);
+  border: 1px solid var(--edge);
+  animation: pop 0.32s var(--ease) both;
+  box-shadow: 0 50px 100px -40px rgba(0, 0, 0, 0.9);
+}
+.sheet-body h3 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 24px;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.field input {
+  height: 36px;
+  padding: 0 11px;
+  border: 1px solid var(--edge-2);
+  border-radius: 4px;
+  background: var(--chrome);
+  color: var(--fg);
+  font-size: 14px;
+  transition: border-color 0.24s var(--ease);
+}
+.field input:hover {
+  border-color: var(--edge-3);
+}
+/* The border going to signal is the focus indicator. The global outline on top
+   of it draws a second ring three pixels out and the field reads as an error
+   state rather than an active one. */
+.field input:focus,
+.field input:focus-visible {
+  border-color: var(--signal);
+  outline: none;
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  /* The ring sits outside the swatch rather than inside it, so picking one
+     does not appear to shrink it. */
+  box-shadow: 0 0 0 1px var(--edge);
+  transition:
+    transform 0.18s var(--ease),
+    box-shadow 0.18s var(--ease);
+}
+.swatch:hover {
+  transform: scale(1.12);
+}
+.swatch[aria-checked='true'] {
+  transform: scale(1.08);
+  box-shadow:
+    0 0 0 2px var(--void),
+    0 0 0 4px var(--fg);
+}
+
+/* Three mutually exclusive levels, all three visible at once. A dropdown would
+   hide the two you did not pick, and the whole point of this control is that
+   you can see what the other settings would have done. */
+/* Columns from the number of buttons, not a fixed three. The blast radius
+   control has three levels and the posture control has two, and a fixed three
+   left the posture control with an empty cell that read as a third option
+   nobody could press. */
+.seg {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  border: 1px solid var(--edge-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.seg button {
+  padding: 9px 6px;
+  background: var(--chalk);
+  border: none;
+  border-right: 1px solid var(--edge);
+  color: var(--fg-4);
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    color 0.2s var(--ease),
+    background 0.2s var(--ease);
+}
+.seg button:last-child {
+  border-right: none;
+}
+.seg button:hover {
+  color: var(--fg);
+  background: var(--chalk-2);
+}
+.seg button[aria-checked='true'] {
+  color: var(--void);
+  background: var(--signal);
+}
+/* Production is the level that refuses requests, so it is the one level that
+   does not read as an ordinary selection. */
+.seg button[aria-checked='true'][data-level='block'] {
+  background: var(--alarm);
+  color: var(--fg);
+}
+.note--warn {
+  color: color-mix(in srgb, var(--alarm) 82%, var(--fg-3));
+}
+.note--warn b {
+  color: var(--alarm);
+}
+.seg-note {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  line-height: 1.6;
+  letter-spacing: 0.05em;
+  color: var(--mute-5);
+  min-height: 2.4em;
+}
+
+/* --------------------------------------------------------- blast radius */
+
+.row--audit {
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+}
+.row--audit .name {
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+.row--audit.blocked .dot {
+  --dot-tone: var(--alarm);
+}
+.row--audit.warned .dot {
+  --dot-tone: var(--signal);
+}
+/* Recorded and nothing else. Still given a dot, because a row with an empty
+   column reads as a rendering fault rather than as a quieter severity. */
+.row--audit.logged .dot {
+  --dot-tone: var(--mute-5);
+}
+.verb {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--mute-5);
+}
+.verb.blocked {
+  color: var(--alarm);
+}
+.verb.warned {
+  color: var(--signal-mid);
+}
+
+.sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------------- identity */
+
+/* Sits under .name, where .sub already lives, so a session shows what the user
+   called it and what its tokens say it actually is. */
+.who {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--signal-mid);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Gap, not whitespace between nodes. Adjacent inline text nodes collapse and
+   the two labels end up reading as one word. */
+.tags {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.tag {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--fg-4);
+  background: var(--chalk);
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 3px 7px;
+  white-space: nowrap;
+}
+.tag--signed {
+  color: var(--signal);
+  border-color: rgba(220, 234, 79, 0.34);
+  background: rgba(220, 234, 79, 0.09);
+}
+.tag--open {
+  color: var(--ok);
+  border-color: rgba(123, 201, 111, 0.34);
+  background: rgba(123, 201, 111, 0.09);
+}
+.tag--production {
+  color: var(--alarm);
+  border-color: rgba(196, 97, 74, 0.4);
+  background: rgba(196, 97, 74, 0.1);
+}
+.tag--system {
+  color: var(--mute-5);
+}
+
+/* A party spared from the block, which is a deliberate choice rather than a
+   failure to block, so it reads as neither of the other two. */
+.tag--allowed {
+  color: var(--ok);
+  border-color: rgba(123, 201, 111, 0.4);
+  background: rgba(123, 201, 111, 0.1);
+}
+
+/* A tag that is also a control. It has to look pressable without becoming a
+   button, because forty buttons in a list is a wall rather than a list. */
+.tag--act {
+  cursor: pointer;
+  font-family: inherit;
+  transition:
+    filter 0.18s var(--ease),
+    opacity 0.18s var(--ease);
+}
+.tag--act:hover:not(:disabled),
+.tag--act:focus-visible:not(:disabled) {
+  filter: brightness(1.45);
+  outline: none;
+}
+.tag--act:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* ------------------------------------------------------- third parties
+
+   Two row types: a header per session carrying the control, and the sightings
+   under it. The sightings are indented so the grouping reads without a border
+   for every one of them, which at forty rows would be a cage. */
+
+.row--tp-head {
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  background: var(--lift-3);
+}
+
+.row--tp {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding-left: calc(var(--gut) + 20px);
+  background: var(--lift);
+}
+
+.row--tp .name--sm {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.01em;
+}
+
+.tag--blocked {
+  color: var(--ok);
+  border-color: rgba(123, 201, 111, 0.34);
+  background: rgba(123, 201, 111, 0.09);
+}
+
+/* On rather than pressed: this is a state the row is in, not a button that was
+   clicked, and it has to read that way at a glance across several sessions. */
+.btn--on {
+  color: var(--ok);
+  border-color: rgba(123, 201, 111, 0.45);
+  background: rgba(123, 201, 111, 0.1);
+}
+
+.note--lead {
+  max-width: 66ch;
+  margin-bottom: 16px;
+}
+
+/* --------------------------------------------------------------- switch */
+
+.channels {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.toggle-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 13px var(--gut);
+  border-bottom: 1px solid var(--hair);
+}
+.channels .toggle-row:last-child {
+  border-bottom: 0;
+}
+.toggle-label {
+  font-size: 13.5px;
+  color: var(--fg-2);
+  line-height: 1.5;
+}
+.toggle-label small {
+  display: block;
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--mute-5);
+  margin-top: 5px;
+}
+
+.switch {
+  width: 34px;
+  height: 18px;
+  flex: none;
+  border-radius: 999px;
+  border: 1px solid var(--edge-2);
+  background: var(--chalk);
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
+  transition:
+    background 0.24s var(--ease),
+    border-color 0.24s var(--ease);
+}
+.switch .knob {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--fg-4);
+  transition:
+    transform 0.24s var(--ease),
+    background 0.24s var(--ease);
+}
+.switch[aria-checked='true'] {
+  background: var(--signal);
+  border-color: var(--signal);
+}
+.switch[aria-checked='true'] .knob {
+  background: var(--void);
+  transform: translateX(14px);
+}
+.switch:disabled {
+  opacity: 0.34;
+  cursor: not-allowed;
+}
+.switch:hover:not(:disabled):not([aria-checked='true']) {
+  border-color: var(--edge-3);
+}
+
+/* --------------------------------------------------------------- adopt */
+
+.sheet-body--wide {
+  width: min(720px, 94vw);
+  max-height: 86vh;
+  gap: 16px;
+}
+.sheet-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sheet-head .note {
+  margin: 0;
+  padding: 0;
+  max-width: none;
+}
+
+/* The two buttons share a column width rather than sizing to their labels.
+   "Select signed in" beside "Clear" came out three times the width and read as
+   a primary action next to an afterthought, which is backwards: they are two
+   ways of setting the same selection. */
+.tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(2, minmax(96px, auto));
+  gap: 8px;
+  align-items: center;
+}
+.tools .btn {
+  width: 100%;
+  height: 32px;
+}
+.tools input {
+  height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--edge-2);
+  border-radius: 4px;
+  background: var(--chrome);
+  color: var(--fg);
+  font-size: 13px;
+  transition: border-color 0.24s var(--ease);
+}
+.tools input:hover {
+  border-color: var(--edge-3);
+}
+.tools input:focus,
+.tools input:focus-visible {
+  border-color: var(--signal);
+  outline: none;
+}
+.tools input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+/* Flexes so the list absorbs the sheet's spare height instead of pushing the
+   footer, which is where the rule budget lives and must never scroll away. */
+.adopt-list {
+  flex: 1 1 auto;
+  min-height: 140px;
+  max-height: 42vh;
+  margin-top: 0;
+  border: 1px solid var(--edge);
+  border-radius: 4px;
+  background: var(--chrome);
+}
+
+.check {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--edge-3);
+  border-radius: 3px;
+  background: var(--chalk);
+  position: relative;
+  transition:
+    border-color 0.2s var(--ease),
+    background 0.2s var(--ease);
+}
+.check::after {
+  content: '';
+  position: absolute;
+  left: 4.5px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--void);
+  border-width: 0 1.6px 1.6px 0;
+  transform: rotate(45deg) scale(0.4);
+  opacity: 0;
+  transition:
+    transform 0.2s var(--ease),
+    opacity 0.14s var(--ease);
+}
+.check[aria-checked='true'] {
+  background: var(--signal);
+  border-color: var(--signal);
+}
+.check[aria-checked='true']::after {
+  transform: rotate(45deg) scale(1);
+  opacity: 1;
+}
+.check:hover:not([aria-checked='true']) {
+  border-color: var(--signal);
+}
+
+.row--adopt {
+  cursor: pointer;
+}
+.row--adopt:hover {
+  background: var(--chalk);
+}
+.row--adopt .name {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.adopt-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 15px;
+  border-top: 1px solid var(--edge);
+}
+.adopt-foot .toggle-row {
+  padding: 0;
+  border-bottom: 0;
+}
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.meter-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--chalk-2);
+  overflow: hidden;
+}
+.meter-fill {
+  height: 100%;
+  width: 0;
+  background: var(--signal);
+  transition:
+    width 0.32s var(--ease),
+    background 0.24s var(--ease);
+}
+.meter-fill.warn {
+  background: var(--warn);
+}
+.meter-fill.over {
+  background: var(--fail);
+}
+.meter-text {
+  font-family: var(--font-mono);
+  font-weight: 300;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  color: var(--fg-4);
+  font-variant-numeric: tabular-nums;
+}
+.meter-text.over {
+  color: var(--fail);
+}
+
+/* The page, and only the page, collapses its row grids when the window gets
+   narrow. Unscoped, this fired inside the popup permanently and stacked every
+   control in every row full width down the left edge. */
+@media (max-width: 620px) {
+  .wrap {
+    padding: 34px 18px 70px;
+  }
+  .wrap .row--tab {
+    grid-template-columns: 10px minmax(0, 1fr);
+  }
+  .wrap .row--tab > *:nth-child(n + 3) {
+    grid-column: 2;
+  }
+  .wrap .tools {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .wrap .adopt-list {
+    max-height: 34vh;
+  }
+}

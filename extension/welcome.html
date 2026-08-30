@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Set up NVX Session</title>
+    <link rel="stylesheet" href="ui/tokens.css" />
+    <link rel="stylesheet" href="panel.css" />
+    <link rel="stylesheet" href="guide.css" />
+    <link rel="stylesheet" href="welcome.css" />
+  </head>
+  <body>
+    <div class="wrap wrap--wide">
+      <header class="wel-hero">
+        <p class="eyebrow">NVX SESSION // SETUP</p>
+        <h1>Sort out the tabs you already have open</h1>
+        <p class="wel-lede">
+          The accounts you are signed into right now are at the top, with the
+          number of your open tabs beside each one, and those are the ones
+          already ticked. Tabs on them move into their session without
+          reloading. Cookies are <b>copied, never moved</b>, so nothing you are
+          in the middle of is disturbed and undoing a mistake costs nothing but
+          deleting a session.
+        </p>
+        <div class="wel-strip" id="strip"><span data-label>reading this profile</span></div>
+      </header>
+
+      <main class="wel-main">
+        <section class="wel-list-block">
+          <div class="block-head">
+            <h2>What you have open</h2>
+            <div class="head-actions head-actions--dense">
+              <button class="btn btn--quiet" id="pick-open" type="button">
+                Select what is open
+              </button>
+              <button class="btn btn--quiet" id="pick-signed" type="button">
+                All signed in
+              </button>
+              <button class="btn btn--quiet" id="pick-none" type="button">Clear</button>
+              <button class="btn btn--quiet" id="show-all" type="button" aria-pressed="false">
+                Show everything
+              </button>
+            </div>
+          </div>
+          <p class="note note--lead" id="list-note">
+            The accounts with tabs open come first, then everything else this
+            browser is carrying, ranked by how much each one looks like a real
+            signed-in account rather than a preference cookie. Sites that share
+            one account are grouped together, because a university login covers
+            the portal, the sign-in page and the learning system, and those are
+            one thing rather than three.
+          </p>
+          <div class="wel-list" data-scrollable id="list">
+            <p class="empty">READING THE PROFILE JAR</p>
+          </div>
+        </section>
+
+        <aside class="wel-side">
+          <div class="wel-card">
+            <h3>What happens when you press it</h3>
+            <ol class="wel-num">
+              <li>
+                <b>Your open tabs get grouped</b>
+                <span>Tabs on the same account go into one session together, named after the account and coloured so they are recognisable at a glance.</span>
+              </li>
+              <li>
+                <b>Its cookies are copied in</b>
+                <span>The browser's own jar is left exactly as it was.</span>
+              </li>
+              <li>
+                <b>Open tabs move across</b>
+                <span
+                  >Tabs already on those sites join the session. They do not reload,
+                  because the cookies are identical.</span
+                >
+              </li>
+              <li>
+                <b>New tabs follow the site</b>
+                <span
+                  >A site exactly one session claims takes new tabs on its own. A
+                  site two sessions claim asks you which.</span
+                >
+              </li>
+            </ol>
+          </div>
+
+          <div class="wel-card wel-card--warn">
+            <h3>One thing to know first</h3>
+            <p>
+              Setting up copies the cookies you have <b>right now</b>. For most sites that is
+              exactly right. For a big account you also keep using in your normal browser, Google
+              most of all, copying a half-finished login can make the site think your session was
+              stolen and sign you out of it. For those, the safer move is
+              <b>Sign in here</b> on a session, which signs in fresh instead of copying. The guide
+              explains why in one short chapter.
+            </p>
+          </div>
+
+          <div class="wel-card wel-card--quiet">
+            <h3>You can skip this</h3>
+            <p>
+              Nothing here is required. Sessions can be made by hand at any time from
+              the toolbar button, and this screen is behind
+              <b>Sessions &rsaquo; Adopt existing</b> whenever you want it back.
+            </p>
+          </div>
+
+          <div class="wel-actions">
+            <div class="wel-meter" id="meter"></div>
+            <button class="btn btn--primary btn--big" id="go" type="button" disabled>
+              Set up 0 sessions
+            </button>
+            <button class="btn btn--quiet" id="skip" type="button">Not now</button>
+          </div>
+        </aside>
+      </main>
+
+      <section class="wel-done" id="done" hidden>
+        <h2>Done</h2>
+        <div class="wel-result" id="result"></div>
+        <div class="wel-actions wel-actions--row">
+          <button class="btn btn--primary" id="open-guide" type="button">Read the guide</button>
+          <button class="btn" id="close" type="button">Close this tab</button>
+        </div>
+      </section>
+    </div>
+    <script src="base.js"></script>
+    <script src="welcome.js"></script>
+  </body>
+</html>

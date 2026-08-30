@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NVX Diagnostics</title>
+    <link rel="stylesheet" href="ui/tokens.css" />
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="head">
+        <p class="eyebrow">NVX SESSION // DIAGNOSTICS</p>
+        <h1>Diagnostics</h1>
+        <div class="strip" id="strip"><span data-label>reading state</span></div>
+      </header>
+
+      <p class="note note--lead">
+        Everything else moved into the toolbar popup. These stayed because each one
+        opens real tabs to measure against, and a popup closes the moment it loses
+        focus, so a run would destroy the surface reporting on it.
+      </p>
+
+      <section class="block">
+        <div class="block-head">
+          <h2>Diagnostics</h2>
+          <div class="head-actions head-actions--dense">
+            <button class="btn" id="selftest" type="button">Isolation</button>
+            <button class="btn" id="restoretest" type="button">Restore</button>
+            <button class="btn" id="painttest" type="button">Mark</button>
+            <button class="btn" id="storagetest" type="button">Storage</button>
+            <button class="btn" id="guardtest" type="button">Guard</button>
+            <button class="btn" id="copy" type="button" disabled>Copy report</button>
+          </div>
+        </div>
+        <p class="note" id="selftest-note">
+          Needs the fixture origin running:
+          <code>node tools/fixture/server.mjs</code>. It creates two throwaway
+          sessions, proves they cannot see each other, and removes them again.
+        </p>
+        <div class="rows" data-scrollable id="results">
+          <p class="empty">NOT RUN YET</p>
+        </div>
+      </section>
+    </div>
+    <script src="base.js"></script>
+    <script src="panel.js"></script>
+  </body>
+</html>

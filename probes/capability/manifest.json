@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "NVX Capability Probe",
+  "version": "0.1.0",
+  "description": "Measures which extension APIs actually work, and whether they work the way NVX Session needs them to.",
+  "minimum_chrome_version": "111",
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "NVX Capability Probe" },
+  "permissions": [
+    "declarativeNetRequest",
+    "declarativeNetRequestFeedback",
+    "webRequest",
+    "scripting",
+    "cookies",
+    "tabs",
+    "storage",
+    "debugger",
+    "tabGroups",
+    "offscreen"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "web_accessible_resources": [
+    {
+      "resources": ["probe-asset.js"],
+      "matches": ["<all_urls>"],
+      "use_dynamic_url": true
+    },
+    {
+      "resources": ["panel.html"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

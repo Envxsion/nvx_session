@@ -1,0 +1,70 @@
+{
+  "manifest_version": 3,
+  "name": "NVX Session",
+  "version": "0.1.0",
+  "_comment_key": "Pins the extension id. Without it Chromium derives the id from the absolute path of the unpacked folder, so moving or renaming the folder produces a different extension: new id, empty storage, every session gone. With it the id is this key, wherever the build sits, and a rebuild is an update rather than a new install.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAm7hqoVB0u1RuJYG7AOjy97U/4m4DtYZYKK3oTtjnSPjPckM+EeGUt14zs/2Pgpu04iNJboEJpyr2M7m93FMtvOV+qNXgojf0SeICDDvaaW34F/yvppwukZcFMEGJhIKHit0hgbijrJLbtA4Ccu2PN4q0cteT5EUP8jETV2XgF/URbod8y4SRlKlPQo6j2DJUUFMhLZ3V0Fp5bDWFlmSS7ZO9FUlh8LpFiYbzYtathqkHUlWjpYJJhJIiMCQmdwgMIYTyB1wH09EiIQSi0d7rEVBZ1ErJBC8vWHDU9QL8W3HbWNWTWf2zeMnQJI1ijQHE2HlL6vm+iXF7QT83tO9HCQIDAQAB",
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "description": "Many accounts on one site, in one window, with independent sessions per tab.",
+  "minimum_chrome_version": "128",
+  "background": {
+    "service_worker": "src/bg/index.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "NVX Session",
+      "default_icon": {
+        "16": "icons/16.png",
+        "32": "icons/32.png"
+      },
+    "default_popup": "popup.html"
+  },
+  "_comment_commands": "Chrome allows at most four commands to suggest a key, and open-panel uses one, so sessions 1 to 3 get Alt+1 to Alt+3 out of the box and 4 to 8 are declared but unbound, ready for the user to assign at chrome://extensions/shortcuts. The handler moves the active tab to the Nth session in the list.",
+  "commands": {
+    "open-panel": {
+      "suggested_key": {
+        "default": "Alt+Shift+S"
+      },
+      "description": "Open the NVX Session panel"
+    },
+    "move-to-session-1": {
+      "suggested_key": { "default": "Alt+1" },
+      "description": "Move the active tab to session 1"
+    },
+    "move-to-session-2": {
+      "suggested_key": { "default": "Alt+2" },
+      "description": "Move the active tab to session 2"
+    },
+    "move-to-session-3": {
+      "suggested_key": { "default": "Alt+3" },
+      "description": "Move the active tab to session 3"
+    },
+    "move-to-session-4": { "description": "Move the active tab to session 4" },
+    "move-to-session-5": { "description": "Move the active tab to session 5" },
+    "move-to-session-6": { "description": "Move the active tab to session 6" },
+    "move-to-session-7": { "description": "Move the active tab to session 7" },
+    "move-to-session-8": { "description": "Move the active tab to session 8" }
+  },
+  "permissions": [
+    "declarativeNetRequest",
+    "declarativeNetRequestFeedback",
+    "webRequest",
+    "webNavigation",
+    "scripting",
+    "debugger",
+    "cookies",
+    "tabs",
+    "tabGroups",
+    "storage",
+    "contextMenus",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ]
+}
