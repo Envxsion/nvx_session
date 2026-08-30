@@ -121,17 +121,26 @@ console.log(`compiling (tier ${tier}${useProCode ? ', pro code' : ', free code'}
 // build, or any build with no submodule, compiles the free tree and then strips
 // src/pro from the output, so it cannot carry Pro code even as dead modules.
 const PRO_GATE = "export * from '../pro/index.js';\n";
-const swaps = useProCode
-  ? [
+let swaps = [];
+if (useProCode) {
+  try {
+    swaps = [
       ['src/kernel/pro.ts', PRO_GATE],
       ['src/content/shim.ts', readFileSync(join(ROOT, 'src/pro/overlay/content/shim.ts'), 'utf8')],
       ['src/mask/index.ts', readFileSync(join(ROOT, 'src/pro/overlay/mask/index.ts'), 'utf8')],
-    ]
-  : [];
+    ];
+  } catch (e) {
+    throw new Error(
+      `Pro build: a src/pro/overlay file is missing, check the pro submodule (${e.message})`
+    );
+  }
+}
 const savedSwaps = swaps.map(([p]) => [p, readFileSync(join(ROOT, p), 'utf8')]);
-for (const [p, content] of swaps) writeFileSync(join(ROOT, p), content);
 
 try {
+  // The swap writes live inside the try so a mid-loop failure is still undone by
+  // the finally, which restores every saved original.
+  for (const [p, content] of swaps) writeFileSync(join(ROOT, p), content);
   // Invoking the compiler through node rather than a shim keeps this working the
   // same way on every platform and shell. outDir is passed explicitly rather
   // than taken from tsconfig, which pins it to dist/. Without this the MV2 build

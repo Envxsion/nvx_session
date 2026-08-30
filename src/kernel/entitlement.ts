@@ -1,35 +1,13 @@
 /**
- * The one place a Pro feature asks whether it is allowed to run.
- *
- * The discipline here is the telemetry discipline exactly (see
- * `src/kernel/telemetry.ts`): the client holds only public material, the private
- * signing key lives on the server and never enters the bundle, and every failure
- * resolves to the free product working exactly as it does today. Nothing free
- * ever depends on this module returning true.
- *
- * A licence is a compact signed token, a JWS-like triple
- * `base64url(header).base64url(payload).base64url(signature)` signed with
- * Ed25519. The verifier hardcodes the algorithm and selects the public key by
- * the token's `kid`, so the JWT family's `alg: none` and algorithm-confusion
- * holes have no surface here: there is no negotiation to subvert.
- *
- * Verification is offline. A paid feature that stops working when the network
- * does is worse than no feature, so once a device holds a token it is verified
- * with no network at all. The server is consulted only for lifecycle (extend,
- * revoke, transfer), which `license.ts` handles; this module never touches the
- * network.
- *
- * Two independent gates, belt and braces:
- *
- *   - the build tier. A build compiled `free` (its manifest carries
- *     `nvx_tier: 'free'`, or none) is inert: no token, however valid, unlocks
- *     anything. This is what keeps the free listing honest even though one
- *     package carries both tiers' code.
- *   - a verified token. In a `pro` build, entitlement is derived from a token
- *     that verifies, has not expired, and is bound to this device.
- *
- * The decision is computed once when the token changes and then cached, so a
- * gate check on a hot path is a map lookup, never a signature verify.
+ * ------------------------------------------------------------------
+ *  Title    |  Entitlement gate
+ *  Ref      |  license.ts, pro.ts, manifest nvx_tier
+ *  ID       |  Pro tier (DESIGN sec 30)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Answers "may this Pro feature run", offline.
+ *  Note     |  Free builds are inert. No token ever unlocks them.
+ *  Author   |  Ojas Kekre, 27/08/2026
+ * ------------------------------------------------------------------
  */
 
 /**
@@ -205,9 +183,10 @@ function featuresOf(claims: LicenseClaims): Set<Feature> {
 }
 
 /**
- * Verifies a token and resolves it to a decision. The whole security-relevant
- * path, and it fails to free on every branch that is not a fully valid token
- * bound to this device.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Token -> decision.
+ *  Note     |  Any bad path falls back to "free". Offline only.
+ * ------------------------------------------------------------------
  */
 export async function decideFromToken(
   token: string,
