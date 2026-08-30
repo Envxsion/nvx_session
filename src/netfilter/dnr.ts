@@ -1,11 +1,17 @@
 /**
- * The declarativeNetRequest backend.
- *
- * Everything the compiler produces has to get into the browser atomically and
- * in order. The failure modes that matter here are quiet ones: a rejected
- * batch leaves the previous rules in place, which means a managed tab keeps
- * sending a stale identity, and an overflowing batch drops rules whose absence
- * lets the profile jar through. Both are silent unless this layer reports them.
+ * ------------------------------------------------------------------
+ *  Title    |  declarativeNetRequest backend
+ *  Ref      |  types.ts, compile.ts, blocking.ts
+ *  ID       |  M2 (netfilter)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Install compiled rules into the browser atomically and
+ *           |  in order.
+ *  Note     |  The failures that matter are quiet: a rejected batch
+ *           |  keeps stale rules (a managed tab sends a stale
+ *           |  identity), an overflow drops rules (the profile jar
+ *           |  leaks). Both are silent unless this layer reports them.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import type { NetFilterBackend, Rule } from './types.js';
@@ -37,9 +43,12 @@ export class RuleLimitExceeded extends Error {
 }
 
 /**
- * Duplicate ids in one call are rejected outright by Chrome, and the compiler
- * can legitimately produce the same id twice across a recompile of two
- * domains. Last write wins, matching the order the compiler emitted them.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Drop duplicate rule ids before an update.
+ *  Note     |  Chrome rejects duplicate ids in one call, and the
+ *           |  compiler can emit the same id twice across a recompile
+ *           |  of two domains. Last write wins, matching emit order.
+ * ------------------------------------------------------------------
  */
 export function dedupeById(rules: Rule[]): Rule[] {
   const byId = new Map<number, Rule>();
@@ -51,9 +60,12 @@ export class DnrBackend implements NetFilterBackend {
   readonly name = 'dnr' as const;
 
   /**
-   * Every apply is chained. Two overlapping flushes would interleave their
-   * remove and add phases, and because remove runs first inside a single call,
-   * the loser's additions can be erased by the winner's removals.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Every apply is chained.
+   *  Note     |  Two overlapping flushes would interleave remove and
+   *           |  add phases, and since remove runs first, the loser's
+   *           |  additions can be erased by the winner's removals.
+   * ------------------------------------------------------------------
    */
   private tail: Promise<unknown> = Promise.resolve();
 
@@ -129,12 +141,14 @@ export class DnrBackend implements NetFilterBackend {
   }
 
   /**
-   * A batch is atomic, so one malformed rule rejects the lot and the error
-   * names a constraint rather than an id. Bisecting is the only way to learn
-   * which rule was at fault, and it matters: the alternative is a session that
-   * silently stops isolating with no indication why.
-   *
-   * Only runs on the error path, so the cost is paid once per bad rule.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Bisect a rejected batch to name the rule at fault.
+   *  How      |  A batch is atomic, so one bad rule rejects the lot
+   *           |  and the error names a constraint, not an id.
+   *  Note     |  Only runs on the error path, so the cost is paid once
+   *           |  per bad rule. The alternative is a session that
+   *           |  silently stops isolating with no indication why.
+   * ------------------------------------------------------------------
    */
   private async isolate(
     rules: Rule[],
@@ -167,13 +181,14 @@ function message(err: unknown): string {
 }
 
 /**
- * Adapts the live browser API to the injectable surface used above.
- *
- * Returns an inert one when declarativeNetRequest is absent, which is the MV2
- * build: there the blocking backend does the work and nothing ever calls this.
- * Reaching for the namespace unguarded threw at module scope and took the whole
- * background page down with it, which presents as an extension that loaded and
- * then did nothing at all.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Adapt the live browser API to the injectable surface.
+ *  Note     |  Returns an inert one when declarativeNetRequest is
+ *           |  absent (the MV2 build, where blocking does the work).
+ *  Bug-Fix  |  Reaching for the namespace unguarded threw at module
+ *           |  scope and took the background page down, presenting as
+ *           |  an extension that loaded and then did nothing.
+ * ------------------------------------------------------------------
  */
 export function browserDnrApi(): DnrApi {
   const dnr = (chrome as { declarativeNetRequest?: typeof chrome.declarativeNetRequest })

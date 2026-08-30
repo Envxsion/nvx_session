@@ -1,16 +1,19 @@
 /**
- * Public suffix checks.
- *
- * Without this a malicious or careless Set-Cookie can scope a cookie to
- * ".co.uk" and have it sent to every site under that suffix. Browsers refuse
- * that, so the jar must too.
- *
- * This is a compact rule set covering the suffixes that actually appear in
- * practice, not the full Public Suffix List. DESIGN.html section 08 calls for
- * the real list compiled to a binary trie; that is a build-time task and this
- * stands in until then. It is deliberately conservative: unknown two-label
- * names under a known multi-level TLD are treated as public suffixes, so the
- * failure mode is rejecting a cookie rather than over-sharing one.
+ * ------------------------------------------------------------------
+ *  Title    |  Public suffix checks
+ *  Ref      |  cookie.ts, store.ts, DESIGN sec 08
+ *  ID       |  M1 (cookie jar)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Refuse a cookie scoped to a public suffix like
+ *           |  ".co.uk", as browsers do.
+ *  How      |  A compact rule set covering the suffixes seen in
+ *           |  practice, standing in for the full Public Suffix List
+ *           |  until it is compiled to a trie at build time.
+ *  Note     |  Conservative: unknown two-label names under a known
+ *           |  multi-level TLD are treated as public, so the failure
+ *           |  mode is rejecting a cookie, not over-sharing one.
+ *  Author   |  Ojas Kekre, 17/08/2026
+ * ------------------------------------------------------------------
  */
 
 const SINGLE_LABEL_IS_PUBLIC = true;
@@ -47,9 +50,11 @@ const MULTI_LEVEL = new Set([
 ]);
 
 /**
- * Hosting suffixes where each label is a separate owner. Treating these as
- * public matters: two different projects on the same platform must not be able
- * to set cookies for each other.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Hosting suffixes where each label is a separate owner.
+ *  Note     |  Treating these as public keeps two projects on one
+ *           |  platform from setting cookies for each other.
+ * ------------------------------------------------------------------
  */
 const PRIVATE_SUFFIXES = new Set([
   'github.io', 'githubusercontent.com', 'gitlab.io', 'pages.dev', 'workers.dev',
@@ -62,15 +67,21 @@ const PRIVATE_SUFFIXES = new Set([
 ]);
 
 /**
- * localhost and bare hostnames have no registrable domain, so a Domain
- * attribute on them is meaningless and is rejected.
+ * ------------------------------------------------------------------
+ *  Purpose  |  localhost and bare hostnames have no registrable
+ *           |  domain, so a Domain attribute on them is rejected.
+ * ------------------------------------------------------------------
  */
 /**
- * A name is a public suffix when it *is* one, not when it merely ends with
- * one. The distinction matters: "co.uk" is a public suffix, "shop.co.uk" is a
- * registration under it. Conflating the two made every registrable domain one
- * label too long, which would have grouped rules under the wrong key and split
- * a single session's cookies across rule sets.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A name is a public suffix when it is one, not when it
+ *           |  merely ends with one.
+ *  Note     |  "co.uk" is a public suffix, "shop.co.uk" a
+ *           |  registration under it.
+ *  Bug-Fix  |  Conflating the two made every registrable domain one
+ *           |  label too long, grouping rules under the wrong key and
+ *           |  splitting a session's cookies across rule sets.
+ * ------------------------------------------------------------------
  */
 export function isPublicSuffix(domain: string): boolean {
   const host = domain.trim().toLowerCase().replace(/\.$/, '');
@@ -84,11 +95,13 @@ export function isPublicSuffix(domain: string): boolean {
 }
 
 /**
- * IPv4 dotted quad, or IPv6 in the bracketed form a URL hostname uses.
- *
- * Deliberately strict about the quad: four labels of digits, each within range.
- * A loose check would catch a real hostname made only of digits, which is legal
- * and would then be treated as an address.
+ * ------------------------------------------------------------------
+ *  Purpose  |  IPv4 dotted quad, or IPv6 in the bracketed form a URL
+ *           |  hostname uses.
+ *  Note     |  Strict about the quad: a loose check would catch a
+ *           |  real all-digits hostname, which is legal, and treat it
+ *           |  as an address.
+ * ------------------------------------------------------------------
  */
 export function isIpLiteral(host: string): boolean {
   const h = host.trim().toLowerCase().replace(/\.$/, '');
@@ -99,19 +112,17 @@ export function isIpLiteral(host: string): boolean {
 }
 
 /**
- * Whether a host can have a subdomain at all.
- *
- * An address cannot. Neither can anything the URL parser will try to read as
- * one: a host whose last label is all digits sends the parser down the IPv4
- * path, and `nvx-unvisited-subdomain.127.0.0.1` is not a failed hostname there
- * but a failed address, which throws rather than returning a name.
- *
- * That mattered. The compiler builds a fallback rule for a synthetic
- * unvisited subdomain of every registrable domain a session touches, and one
- * session that had ever seen an IP origin, a router page or a local dev
- * server, threw inside the compile and took down the flush for that session
- * entirely. No rules installed, no cookies carried, and nothing in the log but
- * "Invalid URL".
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether a host can have a subdomain at all.
+ *  How      |  An address cannot, nor a host whose last label is all
+ *           |  digits: the URL parser reads it as IPv4, so the
+ *           |  synthetic subdomain is a failed address that throws.
+ *  Bug-Fix  |  The compiler builds a fallback rule for a synthetic
+ *           |  unvisited subdomain of every registrable domain, and a
+ *           |  session that saw an IP origin, router page or dev
+ *           |  server threw and took down the whole flush: no rules,
+ *           |  no cookies, only "Invalid URL" in the log.
+ * ------------------------------------------------------------------
  */
 export function canHaveSubdomains(host: string): boolean {
   const h = host.trim().toLowerCase().replace(/\.$/, '');
@@ -121,8 +132,10 @@ export function canHaveSubdomains(host: string): boolean {
 }
 
 /**
- * The registrable domain, used to group cookies into rule sets and to decide
- * first party versus third party.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The registrable domain, used to group cookies into
+ *           |  rule sets and to decide first vs third party.
+ * ------------------------------------------------------------------
  */
 export function registrableDomain(domain: string): string {
   const host = domain.trim().toLowerCase().replace(/\.$/, '');

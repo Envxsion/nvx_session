@@ -1,3 +1,17 @@
+/**
+ * ------------------------------------------------------------------
+ *  Title    |  Netfilter rule and session types
+ *  Ref      |  compile.ts, dnr.ts, blocking.ts
+ *  ID       |  M2 (netfilter)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The shared shapes the compiler and backends speak: the
+ *           |  session view, compile options, and DNR rule types.
+ *  Note     |  Rule shapes are local string unions, not the chrome
+ *           |  enums, so the compiler stays pure and testable; the
+ *           |  cast to the browser type happens at the backend edge.
+ *  Author   |  Ojas Kekre, 19/08/2026
+ * ------------------------------------------------------------------
+ */
 import type { CookieStore } from '../jar/store.js';
 
 export type SessionId = string;
@@ -80,11 +94,14 @@ export interface CompileOptions {
 }
 
 /**
- * Rule shapes are declared here as plain string unions rather than reused from
- * @types/chrome, which models these as TypeScript enums. The wire format is
- * strings, the compiler is pure and unit tested without a browser present, and
- * a local declaration keeps both true. The cast to the browser type happens
- * once, at the backend boundary.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rule shapes as plain string unions, not the enums from
+ *           |  @types/chrome.
+ *  Note     |  The wire format is strings and the compiler is pure and
+ *           |  unit tested without a browser, so a local declaration
+ *           |  keeps both true. The cast happens once, at the backend
+ *           |  boundary.
+ * ------------------------------------------------------------------
  */
 export type ResourceType =
   | 'main_frame'
@@ -155,12 +172,13 @@ export interface NetFilterBackend {
 }
 
 /**
- * What the worker actually drives.
- *
- * The declarative path compiles a session's jar into rules and has to get them
- * installed before the next request; the blocking path reads the jar at request
- * time and has nothing to install. Both answer to these three, and on the
- * blocking side all three are deliberately no-ops.
+ * ------------------------------------------------------------------
+ *  Purpose  |  What the worker actually drives.
+ *  Note     |  The declarative path compiles the jar into rules and
+ *           |  installs them before the next request; the blocking
+ *           |  path reads the jar at request time and installs
+ *           |  nothing, so all three of these are no-ops there.
+ * ------------------------------------------------------------------
  */
 export interface Netfilter {
   markDirty(sessions: Iterable<string>): void;

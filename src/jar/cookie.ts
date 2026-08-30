@@ -1,9 +1,16 @@
 /**
- * Cookie model and Set-Cookie parsing, following RFC 6265bis.
- *
- * The moment the browser jar is bypassed, every semantic it was handling
- * becomes ours. This file owns the parse half; matching and emission live in
- * store.ts and emit.ts.
+ * ------------------------------------------------------------------
+ *  Title    |  Cookie model and Set-Cookie parsing
+ *  Ref      |  store.ts, emit.ts, RFC 6265bis
+ *  ID       |  M1 (cookie jar)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Parse Set-Cookie into the jar's Cookie shape.
+ *  How      |  Owns the parse half; matching and emission live in
+ *           |  store.ts and emit.ts.
+ *  Note     |  Bypassing the browser jar makes every cookie semantic
+ *           |  ours to enforce.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 export type SameSite = 'strict' | 'lax' | 'none';
@@ -63,10 +70,12 @@ export type ParseResult =
 const MAX_PAIR_BYTES = 4096;
 
 /**
- * Chrome rejects SameSite=None without Secure. Matching that matters: a cookie
- * the browser would have dropped must not survive in our jar, or a session
- * behaves differently under NVX than without it, which is the one thing the
- * whole design cannot afford.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Options for parseSetCookie.
+ *  Note     |  Chrome rejects SameSite=None without Secure. A cookie
+ *           |  the browser would drop must not survive here, or a
+ *           |  session behaves differently under NVX than without it.
+ * ------------------------------------------------------------------
  */
 export interface ParseOptions {
   isPublicSuffix: (domain: string) => boolean;
@@ -225,8 +234,11 @@ function parseAttributes(text: string): Attributes {
 }
 
 /**
- * Max-Age wins over Expires when both are present, and a non-positive Max-Age
- * means expire immediately rather than "no expiry".
+ * ------------------------------------------------------------------
+ *  Purpose  |  Resolve a cookie's expiry from Max-Age or Expires.
+ *  Note     |  Max-Age wins when both are present; a non-positive
+ *           |  Max-Age means expire immediately, not "no expiry".
+ * ------------------------------------------------------------------
  */
 function resolveExpiry(attrs: Attributes, now: number): number | null {
   if (attrs.maxAge !== undefined && attrs.maxAge !== '') {
@@ -255,13 +267,13 @@ function normaliseSameSite(value: string | undefined): SameSite {
 }
 
 /**
- * Control characters only.
- *
- * A semicolon can never reach a value, because the parser splits attributes on
- * the first one. A comma is forbidden by the grammar but Chrome accepts it and
- * real cookies contain it, so rejecting one here would break sites that work
- * without NVX. What genuinely cannot be tolerated is a CR, LF or NUL, since the
- * value is concatenated into a header and those would split or truncate it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Reject control characters only.
+ *  Note     |  A semicolon cannot reach a value (the parser splits on
+ *           |  the first one), and a comma is legal in practice, so
+ *           |  only CR, LF or NUL are refused: concatenated into a
+ *           |  header they would split or truncate it.
+ * ------------------------------------------------------------------
  */
 export function hasIllegalOctet(s: string): boolean {
   for (let i = 0; i < s.length; i++) {
@@ -280,8 +292,10 @@ export function canonicalHost(host: string): string {
 }
 
 /**
- * RFC 6265 section 5.1.3. A host matches a cookie domain when it is identical,
- * or is a subdomain of it and is not an IP address.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Host matches a cookie domain (RFC 6265 5.1.3).
+ *  How      |  Identical, or a subdomain of it and not an IP address.
+ * ------------------------------------------------------------------
  */
 export function domainMatches(host: string, cookieDomain: string): boolean {
   if (host === cookieDomain) return true;
@@ -312,8 +326,11 @@ export function isIpAddress(host: string): boolean {
 }
 
 /**
- * Secure-context rules as browsers apply them, so http://localhost can still
- * hold Secure cookies during development.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Secure-context test, as browsers apply it.
+ *  Note     |  http://localhost can still hold Secure cookies during
+ *           |  development.
+ * ------------------------------------------------------------------
  */
 export function isTrustworthy(url: URL): boolean {
   if (url.protocol === 'https:' || url.protocol === 'wss:') return true;

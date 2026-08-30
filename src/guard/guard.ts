@@ -1,13 +1,17 @@
 /**
- * The guard at runtime.
- *
- * Holds the audit trail, decides what happens to a request, and keeps the
- * block rules for the sessions that asked for them in step with their tabs.
- *
- * Slot allocation is its own, in its own id band, because the alternative is a
- * session with many hosts silently spending its guardrails on cookies. That
- * failure would be invisible in exactly the wrong direction: the rules that
- * isolate would still be installed, and the rules that protect would not.
+ * ------------------------------------------------------------------
+ *  Title    |  The guard at runtime
+ *  Ref      |  policy.ts, catalog.ts, audit.ts, netfilter/types.ts
+ *  ID       |  M3 (guard)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Hold the audit trail, decide what happens to a request,
+ *           |  and keep block rules in step with their tabs.
+ *  Note     |  Slot allocation is its own, in its own id band: sharing
+ *           |  the session block would let a session with many hosts
+ *           |  spend its guardrails on cookies, and that failure would
+ *           |  be invisible in exactly the wrong direction.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import type { Rule } from '../netfilter/types.js';
@@ -71,11 +75,13 @@ export class Guard {
   }
 
   /**
-   * What to do about a request, and the audit row it produced.
-   *
-   * Returns null for the overwhelming majority of traffic, which is the point:
-   * this runs on every request, so the common path is one method check and a
-   * handful of failed regex tests.
+   * ------------------------------------------------------------------
+   *  Purpose  |  What to do about a request, and the audit row it
+   *           |  produced.
+   *  Note     |  Null for the overwhelming majority of traffic: this
+   *           |  runs on every request, so the common path is one
+   *           |  method check and a few failed regex tests.
+   * ------------------------------------------------------------------
    */
   note(
     request: { url: string; method: string },
@@ -108,11 +114,13 @@ export class Guard {
   }
 
   /**
-   * Lets one endpoint through for this session for a few minutes.
-   *
-   * Held in memory only. A worker that has been terminated has lost the
-   * allowance, which puts the guard back on rather than leaving a session
-   * quietly unprotected, and that is the direction to fail in.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Let one endpoint through for this session for a few
+   *           |  minutes.
+   *  Note     |  In memory only: a terminated worker loses the
+   *           |  allowance, putting the guard back on rather than
+   *           |  leaving a session unprotected. The right way to fail.
+   * ------------------------------------------------------------------
    */
   unlock(sessionId: string, entryId: string, ms = UNLOCK_MS, now = Date.now()): number {
     const map = this.unlocks.get(sessionId) ?? {};

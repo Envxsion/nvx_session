@@ -1,9 +1,16 @@
 /**
- * A per-session cookie store.
- *
- * One of these exists per session. It never touches the browser jar; the
- * netfilter layer reads from it to build the Cookie header a managed tab will
- * actually send.
+ * ------------------------------------------------------------------
+ *  Title    |  Per-session cookie store
+ *  Ref      |  cookie.ts, psl.ts, netfilter/compile.ts
+ *  ID       |  M1 (cookie jar)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Hold one session's cookies, indexed for rule
+ *           |  compilation.
+ *  Note     |  One per session. It never touches the browser jar; the
+ *           |  netfilter layer reads it to build the Cookie header a
+ *           |  managed tab actually sends.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import {
@@ -35,9 +42,12 @@ export class CookieStore {
   }
 
   /**
-   * Returns the registrable domains whose contents changed since the last
-   * call. The netfilter flush is driven off this rather than recompiling
-   * everything on every Set-Cookie.
+   * ------------------------------------------------------------------
+   *  Purpose  |  The registrable domains whose contents changed since
+   *           |  the last call.
+   *  Note     |  The netfilter flush is driven off this rather than
+   *           |  recompiling everything on every Set-Cookie.
+   * ------------------------------------------------------------------
    */
   takeDirty(): string[] {
     const out = [...this.dirtyDomains];
@@ -104,9 +114,12 @@ export class CookieStore {
   }
 
   /**
-   * Every cookie that domain-matches and path-matches, in the order RFC 6265
-   * requires: longer paths first, then earlier creation time. SameSite and
-   * Secure filtering is emission's job, not the store's.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Every cookie that domain- and path-matches, in RFC
+   *           |  6265 order: longer paths first, then earlier created.
+   *  Note     |  SameSite and Secure filtering is emission's job, not
+   *           |  the store's.
+   * ------------------------------------------------------------------
    */
   match(url: URL, now: number): Cookie[] {
     const host = url.hostname.toLowerCase();
@@ -142,12 +155,13 @@ export class CookieStore {
   }
 
   /**
-   * Distinct cookie domains under a registrable domain.
-   *
-   * Rules are compiled per host, not per registrable domain, because a
-   * host-only cookie on identity.example.com is not sent to example.com. A
-   * rule built for the apex and applied to the subdomain would carry an empty
-   * header and strip the session it was meant to preserve.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Distinct cookie domains under a registrable domain.
+   *  Note     |  Rules compile per host: a host-only cookie on
+   *           |  identity.example.com is not sent to example.com, so a
+   *           |  rule built for the apex and applied to the subdomain
+   *           |  would carry an empty header and strip the session.
+   * ------------------------------------------------------------------
    */
   hostsFor(registrable: string): string[] {
     const keys = this.byDomain.get(registrable);
@@ -178,8 +192,11 @@ export class CookieStore {
   }
 
   /**
-   * Caps are evicted by least recent access, and expired entries go first so a
-   * jar full of dead cookies never evicts a live one.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Evict caps by least recent access.
+   *  Note     |  Expired entries go first, so a jar full of dead
+   *           |  cookies never evicts a live one.
+   * ------------------------------------------------------------------
    */
   private enforceCaps(registrable: string): void {
     const keys = this.byDomain.get(registrable);

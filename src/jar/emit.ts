@@ -1,19 +1,28 @@
 /**
- * Turning a jar into a Cookie header for a specific request context.
- *
- * This is the part with no prior art. A normal cookie library answers "what
- * would the browser send", once, with full knowledge of the request. We have
- * to answer it ahead of time, for each of the request shapes a declarative
- * rule can distinguish, because the rule is compiled before the request
- * exists. Getting the SameSite split wrong here is what logs you out.
+ * ------------------------------------------------------------------
+ *  Title    |  Emitting a Cookie header for a request
+ *  Ref      |  store.ts, cookie.ts, netfilter/compile.ts
+ *  ID       |  M1 (cookie jar)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Turn a jar into the Cookie header for a request
+ *           |  context.
+ *  How      |  Answers ahead of time, for each request shape a
+ *           |  declarative rule can distinguish, since the rule is
+ *           |  compiled before the request exists.
+ *  Note     |  Getting the SameSite split wrong here is what logs you
+ *           |  out.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { byteLength, isTrustworthy, type Cookie } from './cookie.js';
 import type { CookieStore } from './store.js';
 
 /**
- * The request shapes a DNR condition can tell apart. Each becomes one rule
- * variant per (session, domain).
+ * ------------------------------------------------------------------
+ *  Purpose  |  The request shapes a DNR condition can tell apart.
+ *  Note     |  Each becomes one rule variant per (session, domain).
+ * ------------------------------------------------------------------
  */
 export type EmitContext =
   /** Subresource inside a same-site document. Everything is eligible. */
@@ -76,22 +85,23 @@ export function isSafeMethod(method?: string): boolean {
 }
 
 /**
- * Chrome's Lax-allowing-unsafe window.
- *
- * A cookie that got Lax by default rather than by request is sent on a
- * cross-site top level POST for the first two minutes of its life. The
- * exception exists for form POST single sign-on, where the identity provider
- * posts an assertion back to a service that set its state cookie moments
- * earlier, and without it that whole class of login breaks.
- *
- * Measured, not assumed: enforcing plain 6265bis here produced an assertion
- * POST carrying no cookies at all, and Moodle answered invalidsesskey.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Chrome's Lax-allowing-unsafe window.
+ *  How      |  A defaulted-Lax cookie rides a cross-site top level
+ *           |  POST for its first two minutes, so form POST single
+ *           |  sign-on keeps working.
+ *  Note     |  Measured: plain 6265bis here sent an assertion POST
+ *           |  with no cookies, and Moodle answered invalidsesskey.
+ * ------------------------------------------------------------------
  */
 export const LAX_UNSAFE_WINDOW_MS = 2 * 60 * 1000;
 
 /**
- * Whether the carve-out applies to this cookie at this moment. Exported because
- * the compiler has to know that a rule it just built has an expiry date.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether the carve-out applies to this cookie now.
+ *  Note     |  Exported so the compiler knows a rule it built has an
+ *           |  expiry date.
+ * ------------------------------------------------------------------
  */
 export function withinLaxUnsafeWindow(cookie: Cookie, now: number): boolean {
   return (
@@ -166,9 +176,12 @@ export function emit(
 }
 
 /**
- * The three headers a (session, domain) pair needs, one per rule variant.
- * Returning them together keeps the compiler honest: it is impossible to emit
- * a rule set that covers only some contexts.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The three headers a (session, domain) pair needs, one
+ *           |  per rule variant.
+ *  Note     |  Returning them together keeps the compiler honest: it
+ *           |  cannot emit a set covering only some contexts.
+ * ------------------------------------------------------------------
  */
 export function emitAll(
   store: CookieStore,

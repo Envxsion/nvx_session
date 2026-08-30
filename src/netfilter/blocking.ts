@@ -1,32 +1,20 @@
 /**
- * The blocking webRequest backend.
- *
- * This is the other half of the isolation story, and it is a fundamentally
- * different shape from the declarative one. Instead of compiling a session's
- * jar into rules and racing to install them before the next request, it answers
- * one question at the moment it is asked: what Cookie header should this
- * request carry? The jar is read at request time, so there is nothing to
- * precompile, nothing to flush, and nothing to be stale.
- *
- * Three problems the declarative backend lives with simply do not exist here.
- *
- * The rule ceiling is gone: a session can hold cookies for ten thousand hosts
- * and cost nothing, where declarative rules are capped at 192 per session and
- * overflow silently drops hosts.
- *
- * The flush race is gone: a navigation cannot outrun a rule set that is never
- * installed. §14's whole "await the flush before releasing the navigation"
- * dance is unnecessary.
- *
- * And the service worker gap closes: worker traffic arrives with tabId -1 like
- * everything else, but here the answer can consult who actually owns that
- * origin rather than relying on a rule that had to be compiled in advance for a
- * request nobody could attribute.
- *
- * What it costs is Manifest V2, which is why this is the Opera path and not the
- * default. Measured on Opera GX 134: a blocking listener really does rewrite
- * the Cookie header, where both browsers under MV3 accept the listener and then
- * ignore what it returns.
+ * ------------------------------------------------------------------
+ *  Title    |  Blocking webRequest backend
+ *  Ref      |  jar/emit.ts, jar/store.ts, dnr.ts, exact.ts
+ *  ID       |  M2 (netfilter)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rewrite the Cookie header at request time on Manifest
+ *           |  V2, reading the jar as the request is made.
+ *  How      |  Answers one question when asked, so there is nothing
+ *           |  to precompile, flush or leave stale. No rule ceiling,
+ *           |  no flush race, and worker traffic is attributable.
+ *  Note     |  Costs Manifest V2, so this is the Opera path. Measured
+ *           |  on Opera GX 134: a blocking listener really does
+ *           |  rewrite the header, where MV3 accepts it and ignores
+ *           |  the return value.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { emit, type EmitOptions } from '../jar/emit.js';
@@ -49,9 +37,12 @@ export interface HttpHeader {
 }
 
 /**
- * Who owns this request, if anyone. Returning null means the request belongs to
- * no session and must be left exactly as the browser built it, which is what
- * keeps unmanaged browsing untouched.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Who owns this request, if anyone.
+ *  Note     |  Null means it belongs to no session and is left
+ *           |  exactly as the browser built it, keeping unmanaged
+ *           |  browsing untouched.
+ * ------------------------------------------------------------------
  */
 export type Owner = { id: string; store: CookieStore } | null;
 export type Resolve = (details: RequestDetails) => Owner;
@@ -66,13 +57,13 @@ export interface RewriteResult {
 const COOKIE = 'cookie';
 
 /**
- * Computes the headers a managed request should carry.
- *
- * Returns null for anything unowned, which the listener turns into "leave this
- * request alone". Note the difference between that and an owned request with an
- * empty jar: the first is untouched, the second has its Cookie header removed.
- * Conflating them is the mistake that lets the profile jar through, and it is
- * the same trap the declarative compiler has with a missing rule.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Compute the headers a managed request should carry.
+ *  Note     |  Null (unowned) means leave it alone. Distinct from an
+ *           |  owned request with an empty jar, whose Cookie header
+ *           |  is removed; conflating them lets the profile jar
+ *           |  through, the same trap as a missing declarative rule.
+ * ------------------------------------------------------------------
  */
 export function rewriteHeaders(
   details: RequestDetails,
@@ -132,9 +123,12 @@ export interface BlockingOptions extends EmitOptions {
 }
 
 /**
- * Presents the same surface the flush engine does, so the worker wires either
- * backend without knowing which it has. Every method is a no-op because there
- * is nothing to compile: that is the point.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Present the flush engine's surface so the worker wires
+ *           |  either backend without knowing which it has.
+ *  Note     |  Every method is a no-op because there is nothing to
+ *           |  compile: that is the point.
+ * ------------------------------------------------------------------
  */
 export class BlockingNetfilter {
   readonly name = 'blocking' as const;
@@ -215,11 +209,13 @@ export function browserBlockingApi(): BlockingApi | null {
 }
 
 /**
- * Whether this browser will honour what a blocking listener returns.
- *
- * Measured, not feature-detected: both Chrome and Opera under MV3 accept the
- * listener and the 'blocking' option and then ignore the return value, so the
- * presence of the API proves nothing. Manifest version is the honest signal.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether this browser honours a blocking listener's
+ *           |  return value.
+ *  Note     |  Measured, not feature-detected: Chrome and Opera under
+ *           |  MV3 accept the listener then ignore it, so the API
+ *           |  proves nothing. Manifest version is the honest signal.
+ * ------------------------------------------------------------------
  */
 export function blockingIsReal(): boolean {
   try {

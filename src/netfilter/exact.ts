@@ -1,27 +1,19 @@
 /**
- * Exact per-request cookie rewriting, through the debugger.
- *
- * Why this exists, stated plainly, because it costs a visible infobar and that
- * has to be worth something.
- *
- * The declarative backend compiles a session's jar into rules and installs
- * them. Installing takes time. An origin that sets a cookie in a 303 and
- * redirects immediately gives us no time at all, so the next hop in the chain
- * leaves carrying the previous rule's header. On a federated sign-in every hop
- * is a redirect, so we lose every hop, and the site bounces you back to the
- * identity provider forever. Measured on a real Moodle behind Okta: 287 stale
- * headers out of 2009 requests, and an infinite loop.
- *
- * No amount of tuning fixes that. `onHeadersReceived` cannot block under
- * manifest v3, so there is no point at which we can hold the redirect until the
- * rules catch up. The only mechanism that sees a request late enough to know
- * the jar's current contents and early enough to change what goes on the wire
- * is `Fetch.requestPaused`.
- *
- * So the jar is read at the moment the request is paused, exactly like the
- * blocking backend does on manifest v2, and there is nothing left to go stale.
- * `rewriteHeaders` is shared with that backend rather than reimplemented, so
- * all three paths cannot disagree about what a session should send.
+ * ------------------------------------------------------------------
+ *  Title    |  Exact per-request cookie rewriting (Pro)
+ *  Ref      |  blocking.ts (rewriteHeaders), jar/emit.ts
+ *  ID       |  Pro tier (exact mode)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rewrite a managed tab's Cookie header per request via
+ *           |  the debugger, so nothing goes stale.
+ *  How      |  Fetch.requestPaused reads the jar at the moment the
+ *           |  request pauses; rewriteHeaders is shared with the
+ *           |  blocking backend so the paths cannot disagree.
+ *  Note     |  Costs a visible debugger infobar. onHeadersReceived
+ *           |  cannot block under MV3, so rules cannot always catch a
+ *           |  fast redirect chain in time.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { rewriteHeaders, type Owner, type RequestDetails, type Resolve } from './blocking.js';
@@ -84,21 +76,16 @@ interface Paused {
 }
 
 /**
- * Turns a paused CDP request into the shape the shared rewriter expects.
- *
- * The interesting part is the context, because it decides which SameSite
- * cookies are eligible and getting it wrong silently changes what a session
- * sends.
- *
- * Measured, after getting it wrong: at `requestStage: 'Request'` the paused
- * request has **no `Sec-Fetch-*` headers at all**. They are added later, by the
- * network service, well after CDP hands the request over. Any scheme that reads
- * them here silently falls through to its default on every single request, and
- * the default was the lenient one.
- *
- * What is present is `resourceType`, and `Origin` or `Referer` on anything that
- * has one. So a `Document` request is a navigation, and same-site-ness comes
- * from the initiator, which is what the rest of the kernel already uses.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Turn a paused CDP request into the shape the shared
+ *           |  rewriter expects.
+ *  Note     |  Context decides which SameSite cookies are eligible;
+ *           |  getting it wrong silently changes what a session sends.
+ *  Bug-Fix  |  At requestStage 'Request' there are no Sec-Fetch-*
+ *           |  headers; they are added later. So context comes from
+ *           |  resourceType and Origin/Referer instead: a Document is
+ *           |  a navigation, same-site-ness from the initiator.
+ * ------------------------------------------------------------------
  */
 export function detailsFor(tabId: number, paused: Paused): RequestDetails {
   const headers = paused.request.headers ?? {};
@@ -168,11 +155,14 @@ export interface EngageResult {
 }
 
 /**
- * Attaches to a tab and rewrites its Cookie header per request.
- *
- * Every paused request must be continued. A throw that skips the continue does
- * not fail one request, it hangs the tab, which is worse than any staleness, so
- * the handler continues unmodified rather than propagating anything.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Attaches to a tab and rewrites its Cookie header per
+ *           |  request.
+ *  Note     |  Every paused request must be continued: a throw that
+ *           |  skips the continue hangs the tab, worse than staleness,
+ *           |  so the handler continues unmodified rather than
+ *           |  propagating anything.
+ * ------------------------------------------------------------------
  */
 export interface PausedTrace {
   url: string;
@@ -191,9 +181,12 @@ const TRACE_CAP = 24;
 export class ExactInterceptor {
   private readonly live = new Map<number, { patterns: string[] }>();
   /**
-   * The last few decisions, kept for the suites. Reasoning about what CDP puts
-   * in a paused request is how this got the SameSite context wrong once
-   * already; reading it back is cheaper and does not lie.
+   * ------------------------------------------------------------------
+   *  Purpose  |  The last few decisions, kept for the suites.
+   *  Note     |  Reasoning about what CDP puts in a paused request got
+   *           |  the SameSite context wrong once; reading it back is
+   *           |  cheaper and does not lie.
+   * ------------------------------------------------------------------
    */
   private readonly trace: PausedTrace[] = [];
   /** Tabs an attach is in flight for, so two events cannot race one attach. */
@@ -229,9 +222,12 @@ export class ExactInterceptor {
   }
 
   /**
-   * Which URLs to pause. Scoped to the hosts the session actually has an
-   * opinion about, because pausing every image on the page adds a round trip
-   * per subresource for no benefit.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Which URLs to pause.
+   *  Note     |  Scoped to hosts the session has an opinion about;
+   *           |  pausing every image adds a round trip per subresource
+   *           |  for no benefit.
+   * ------------------------------------------------------------------
    */
   static patternsFor(domains: Iterable<string>): string[] {
     const out = new Set<string>();

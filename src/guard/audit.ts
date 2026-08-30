@@ -1,12 +1,17 @@
 /**
- * The audit trail.
- *
- * "Which session hit which endpoint" is the question you ask after something
- * has gone wrong, which is exactly when the browser has already moved on. So
- * it is recorded as it happens, bounded, and persisted, because an audit trail
- * that does not survive the service worker being terminated is not one.
- *
- * Pure. No browser APIs, no timers.
+ * ------------------------------------------------------------------
+ *  Title    |  The audit trail
+ *  Ref      |  catalog.ts, guard.ts
+ *  ID       |  M3 (guard)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Record which session hit which endpoint, bounded and
+ *           |  persisted.
+ *  Note     |  You ask the question after something has gone wrong, so
+ *           |  it is recorded as it happens; a trail that does not
+ *           |  survive the worker being terminated is not one. Pure:
+ *           |  no browser APIs, no timers.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import type { Severity } from './catalog.js';
@@ -39,11 +44,13 @@ export class AuditLog {
   constructor(private readonly cap = DEFAULT_CAP) {}
 
   /**
-   * Records an event, collapsing an immediate repeat into the previous row.
-   *
-   * A page retrying a failed DELETE three times is one thing that happened. It
-   * matters because the alternative is a trail whose most recent hundred rows
-   * are one retry loop, which buries the entry somebody is actually looking for.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Record an event, collapsing an immediate repeat into
+   *           |  the previous row.
+   *  Note     |  A page retrying a failed DELETE three times is one
+   *           |  thing that happened; without this, a retry loop
+   *           |  buries the entry somebody is looking for.
+   * ------------------------------------------------------------------
    */
   add(entry: Omit<AuditEntry, 'count'>): AuditEntry {
     const last = this.entries[this.entries.length - 1];
@@ -96,9 +103,12 @@ export class AuditLog {
   }
 
   /**
-   * Restores from persisted state, dropping anything malformed rather than
-   * throwing. A trail that refuses to load because one row is wrong loses the
-   * other two hundred.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Restore from persisted state, dropping anything
+   *           |  malformed rather than throwing.
+   *  Note     |  A trail that refuses to load because one row is wrong
+   *           |  loses the other two hundred.
+   * ------------------------------------------------------------------
    */
   load(raw: unknown): void {
     if (!Array.isArray(raw)) return;

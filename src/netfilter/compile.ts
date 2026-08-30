@@ -1,20 +1,19 @@
 /**
- * Compiling a session's jar into declarativeNetRequest rules.
- *
- * The shape here follows what the M0 probe actually confirmed on Chrome 151
- * and Opera 134: tabIds conditions work, tabIds [-1] matches service worker
- * traffic, modifyHeaders with operation "set" replaces the Cookie header
- * outright, and domainType splits first from third party.
- *
- * Three facts drive the design.
- *
- * 1. "set" replaces rather than appends, so a managed tab never sees the
- *    profile jar. That is the whole isolation guarantee.
- * 2. A missing rule is not neutral. With no rule the browser sends its own
- *    cookies, so a session holding nothing for a domain still needs a rule,
- *    one that removes the header.
- * 3. A rule covers a whole domain but cookies are path scoped, so distinct
- *    paths need distinct rules ordered by specificity.
+ * ------------------------------------------------------------------
+ *  Title    |  Compiling a jar into DNR rules
+ *  Ref      |  jar/emit.ts, jar/psl.ts, types.ts, dnr.ts
+ *  ID       |  M2 (netfilter)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Compile a session's jar into declarativeNetRequest
+ *           |  rules.
+ *  How      |  "set" replaces the Cookie header so a managed tab never
+ *           |  sees the profile jar; a missing rule is not neutral, so
+ *           |  a domain with nothing still gets a removing rule; paths
+ *           |  are scoped, so distinct paths get distinct rules.
+ *  Note     |  Shapes follow what the M0 probe confirmed on Chrome 151
+ *           |  and Opera 134.
+ *  Author   |  Ojas Kekre, 24/08/2026
+ * ------------------------------------------------------------------
  */
 
 import {
@@ -29,29 +28,29 @@ import type { CompileOptions, ResourceType, Rule, RuleCondition, SessionView } f
 import { canHaveSubdomains, registrableDomain } from '../jar/psl.js';
 
 /**
- * Rule ids are partitioned so a session's rules can be removed wholesale.
- *
- * Rules are per host rather than per registrable domain, and a real site uses
- * several: www, api, identity, static. 320 covers roughly 75 hosts at four
- * variants each and still leaves room for about 15 concurrent sessions inside
- * the platform ceiling of 5000.
- *
- * Raised from 192 after a real workday session (one "IBL" session pinned to
- * eight work domains, then browsed across Google, Atlassian, Slack, Bitrise,
- * BrowserStack, Firebase and more) overflowed constantly and dropped the rules
- * for whichever auth host it reached last, which was exactly the sign-in the
- * user was in the middle of. The budget is only half the fix: a jar accretes
- * hosts without bound over a long session, so no fixed block fits forever. The
- * other half is compileSession compiling the hosts a tab is actually open on
- * before the rest, so overflow can only ever drop a background jar host and
- * never the page in front of the user. See compileSession.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rule ids partitioned so a session's rules can be
+ *           |  removed wholesale.
+ *  How      |  Rules are per host, and a real site uses several (www,
+ *           |  api, identity, static). 320 covers ~75 hosts at four
+ *           |  variants, leaving room for ~15 sessions under the 5000
+ *           |  ceiling.
+ *  Bug-Fix  |  Raised from 192 after a workday session overflowed and
+ *           |  dropped the rules for whichever auth host it reached
+ *           |  last, mid sign-in. The budget is half the fix; the
+ *           |  other half is compileSession ordering active hosts
+ *           |  first, so overflow only drops a background host.
+ * ------------------------------------------------------------------
  */
 export const RULES_PER_SESSION = 320;
 
 /**
- * How many rules one host costs. Exported because the adoption estimate has to
- * track it exactly: an estimate that runs low tells the user their selection
- * fits and then silently drops the hosts that did not.
+ * ------------------------------------------------------------------
+ *  Purpose  |  How many rules one host costs.
+ *  Note     |  Exported so the adoption estimate tracks it exactly; a
+ *           |  low estimate would silently drop hosts that did not
+ *           |  fit.
+ * ------------------------------------------------------------------
  */
 export const RULES_PER_HOST = 4;
 export const RULE_ID_BASE = 1000;
@@ -59,14 +58,14 @@ export const RULE_ID_BASE = 1000;
 const VARIANTS: readonly EmitContext[] = ['first-party', 'third-party', 'top-level'];
 
 /**
- * A top level navigation compiles to two rules, not one, because SameSite=Lax
- * rides a cross-site navigation only when the method is safe.
- *
- * Without the split, the assertion an identity provider POSTs back to a service
- * carries that service's own session cookie, which the browser itself would
- * have withheld. The endpoint binds its assertion to a session the browser is
- * not actually using, and the site bounces you back to the identity provider
- * forever. One extra rule per host is a cheap price for a sign-in that works.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A top level navigation compiles to two rules, not one.
+ *  How      |  SameSite=Lax rides a cross-site navigation only when
+ *           |  the method is safe, so safe and unsafe split.
+ *  Note     |  Without the split, a POSTed SSO assertion carries a
+ *           |  session cookie the browser would have withheld, and the
+ *           |  site loops back to the identity provider.
+ * ------------------------------------------------------------------
  */
 const SAFE_METHODS = ['get', 'head'];
 const UNSAFE_METHODS = ['post', 'put', 'patch', 'delete', 'options', 'connect', 'other'];
@@ -104,17 +103,23 @@ const SUBRESOURCE_TYPES: ResourceType[] = [
 ];
 
 /**
- * Deterministic id allocation. Ids must be stable across recompiles so an
- * update replaces a rule rather than accumulating duplicates, and must be
- * derivable without persisting a map.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Deterministic id allocation.
+ *  Note     |  Ids must be stable across recompiles so an update
+ *           |  replaces a rule rather than duplicating it, and
+ *           |  derivable without persisting a map.
+ * ------------------------------------------------------------------
  */
 export class RuleIds {
   private readonly sessionSlots = new Map<string, number>();
   /**
-   * Slots are recycled. Without this, creating and deleting sessions over a
-   * long-lived browser session walks the slot counter upward forever and
-   * eventually pushes live sessions past the rule ceiling, which shows up as
-   * isolation quietly failing for whichever session was unlucky.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Slots are recycled.
+   *  Bug-Fix  |  Without this, creating and deleting sessions walks the
+   *           |  slot counter upward forever and pushes live sessions
+   *           |  past the ceiling, quietly failing isolation for
+   *           |  whichever session was unlucky.
+   * ------------------------------------------------------------------
    */
   private readonly freeSlots: number[] = [];
   private nextSlot = 0;
@@ -129,9 +134,12 @@ export class RuleIds {
   }
 
   /**
-   * Frees a slot and returns every id in it, so the caller can withdraw the
-   * rules before the slot is handed to another session. Reusing a slot whose
-   * rules are still live would give the new session the old one's headers.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Free a slot and return every id in it.
+   *  Note     |  The caller withdraws the rules before the slot is
+   *           |  reused; a slot whose rules are still live would give
+   *           |  the new session the old one's headers.
+   * ------------------------------------------------------------------
    */
   releaseSession(sessionId: string): number[] {
     const slot = this.sessionSlots.get(sessionId);
@@ -166,10 +174,13 @@ function defaultScheme(domain: string): 'https:' | 'http:' {
 }
 
 /**
- * Distinct cookie paths for a domain, most specific first. Sending a header
- * built for "/" to a path-scoped cookie's path would under-send; sending the
- * path-scoped one everywhere would over-send. Both are wrong, so each distinct
- * path gets its own rule and priority resolves the overlap.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Distinct cookie paths for a domain, most specific
+ *           |  first.
+ *  Note     |  A "/" header under-sends to a path-scoped cookie; the
+ *           |  path-scoped one everywhere over-sends. So each path
+ *           |  gets its own rule and priority resolves the overlap.
+ * ------------------------------------------------------------------
  */
 function pathsFor(cookies: Cookie[]): string[] {
   const paths = new Set<string>(['/']);
@@ -178,13 +189,14 @@ function pathsFor(cookies: Cookie[]): string[] {
 }
 
 /**
- * A host rule is anchored to that exact host, a fallback rule is not.
- *
- * requestDomains matches subdomains, so without the anchor a rule for
- * example.com would also claim identity.example.com and hand it the apex's
- * host-only cookies. Anchoring keeps each host to itself and lets the
- * registrable-domain fallback own everything nobody has visited yet, which is
- * exactly how the browser scopes cookies.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A host rule is anchored to that exact host, a fallback
+ *           |  rule is not.
+ *  Note     |  requestDomains matches subdomains, so without the
+ *           |  anchor a rule for example.com would claim
+ *           |  identity.example.com and hand it the apex's host-only
+ *           |  cookies. The fallback owns unvisited subdomains.
+ * ------------------------------------------------------------------
  */
 function conditionFor(
   variant: Variant,
@@ -225,10 +237,13 @@ function conditionFor(
 }
 
 /**
- * A host rule outranks the registrable-domain fallback, and a longer path
- * outranks a shorter one. identity.example.com must beat the example.com
- * fallback, or a host-only session cookie is replaced by the fallback's empty
- * header and the sign-in is lost.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A host rule outranks the fallback, a longer path a
+ *           |  shorter one.
+ *  Note     |  identity.example.com must beat the example.com
+ *           |  fallback, or a host-only session cookie is replaced by
+ *           |  the fallback's empty header and the sign-in is lost.
+ * ------------------------------------------------------------------
  */
 function priorityFor(_host: string, path: string, isFallback: boolean): number {
   if (isFallback) return path === '/' ? PRIORITY_FALLBACK : PRIORITY_FALLBACK + 1 + path.length;
@@ -236,18 +251,24 @@ function priorityFor(_host: string, path: string, isFallback: boolean): number {
 }
 
 /**
- * Three tiers. The catch-all removes cookies from anything out of scope, the
- * fallback carries domain-scoped cookies to subdomains nobody has visited yet,
- * and host rules carry the real thing.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Three priority tiers.
+ *  How      |  The catch-all removes cookies out of scope, the
+ *           |  fallback carries domain-scoped cookies to unvisited
+ *           |  subdomains, and host rules carry the real thing.
+ * ------------------------------------------------------------------
  */
 const PRIORITY_CATCH_ALL = 1;
 const PRIORITY_FALLBACK = 2;
 const PRIORITY_HOST = 4;
 
 /**
- * Removes the Cookie header for anything the session has no specific rule for.
- * Only emitted in strict mode, because it also signs a managed tab out of
- * every unrelated site.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Remove the Cookie header for anything the session has
+ *           |  no specific rule for.
+ *  Note     |  Strict mode only; it also signs a managed tab out of
+ *           |  every unrelated site.
+ * ------------------------------------------------------------------
  */
 function catchAllRule(tabIds: number[], id: number): Rule {
   return {
@@ -262,17 +283,14 @@ function catchAllRule(tabIds: number[], id: number): Rule {
 }
 
 /**
- * Strips the Cookie header from third party requests the session has no rule
- * for, which is every tracker on every page it visits.
- *
- * Narrower than the catch-all above on purpose. That one takes first party
- * requests too, which signs a managed tab out of any site the session has not
- * been to yet; this one leaves navigation alone and only removes what the
- * session was never going to be able to answer for anyway.
- *
- * It sits at the bottom priority, so a third party the session genuinely holds
- * cookies for keeps its own host rule and still works. An identity provider in
- * an iframe is third party too, and breaking that would break single sign-on.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Strip the Cookie header from third party requests the
+ *           |  session has no rule for.
+ *  Note     |  Narrower than the catch-all: it leaves navigation
+ *           |  alone. At bottom priority, so a third party the session
+ *           |  holds cookies for keeps its host rule; an iframed
+ *           |  identity provider still works, keeping SSO intact.
+ * ------------------------------------------------------------------
  */
 function thirdPartyRule(tabIds: number[], id: number, allowed: string[] = []): Rule {
   // Excluded on the rule rather than answered by a higher priority one of its
@@ -296,17 +314,15 @@ function thirdPartyRule(tabIds: number[], id: number, allowed: string[] = []): R
 }
 
 /**
- * Forces every response a managed tab receives to be uncacheable.
- *
- * The honest version of per-session cache isolation. Chrome partitions the HTTP
- * cache by top-frame site, not by session, so two same-origin tabs that are
- * different sessions share one cache partition, and there is no web API to give
- * them separate caches short of separate profiles. What is reachable is
- * suppression: a session's tabs can be made to never cache, which closes the
- * same-origin cross-session cache channel (a site stashing an id in a cacheable
- * resource under one session and reading it back under another) at the cost of
- * the cache. Opt-in, because that cost is real; off, the cache is shared and the
- * channel is a disclosed low-severity residual.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Force every response a managed tab receives to be
+ *           |  uncacheable.
+ *  How      |  Chrome partitions the HTTP cache by top-frame site, not
+ *           |  by session, so suppression is the reachable form of
+ *           |  per-session cache isolation.
+ *  Note     |  Opt-in; off, the shared cache is a disclosed
+ *           |  low-severity residual.
+ * ------------------------------------------------------------------
  */
 function cacheRule(tabIds: number[], id: number): Rule {
   return {
@@ -337,10 +353,13 @@ export interface CompiledDomain {
 }
 
 /**
- * A synthetic host used only to compute the fallback header for a registrable
- * domain. Emitting against it yields exactly the cookies that would reach a
- * subdomain nobody has visited: domain-scoped ones match, host-only ones do
- * not, which is what the browser itself would do.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A synthetic host for computing a registrable domain's
+ *           |  fallback header.
+ *  How      |  Emitting against it yields the cookies that reach an
+ *           |  unvisited subdomain: domain-scoped match, host-only do
+ *           |  not, as the browser would do.
+ * ------------------------------------------------------------------
  */
 const UNVISITED = 'nvx-unvisited-subdomain';
 
@@ -355,13 +374,14 @@ function schemeAndHost(origin: string): string {
 }
 
 /**
- * Compiles the rules for one host.
- *
- * Host, not registrable domain. A cookie set by identity.example.com without a
- * Domain attribute is host-only and is never sent to example.com, so a rule
- * built for the apex but matching the subdomain would carry an empty header
- * and delete the session it was supposed to carry. That is the failure mode
- * behind a federated sign-in silently reverting to the wrong account.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Compile the rules for one host.
+ *  Note     |  Host, not registrable domain: a host-only cookie on
+ *           |  identity.example.com is never sent to example.com, so
+ *           |  an apex rule matching the subdomain would carry an
+ *           |  empty header and delete the session, reverting a
+ *           |  federated sign-in to the wrong account.
+ * ------------------------------------------------------------------
  */
 export function compileHost(
   session: SessionView,
@@ -475,9 +495,12 @@ export interface CompiledSession {
 }
 
 /**
- * Compiles every domain the session knows about. Domains beyond the session's
- * rule budget are reported rather than silently dropped, because a silently
- * missing rule means the profile jar leaks into a managed tab.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Compile every domain the session knows about.
+ *  Note     |  Domains beyond the rule budget are reported, not
+ *           |  silently dropped: a missing rule means the profile jar
+ *           |  leaks into a managed tab.
+ * ------------------------------------------------------------------
  */
 export function compileSession(
   session: SessionView,

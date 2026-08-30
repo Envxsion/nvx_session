@@ -1,13 +1,18 @@
 /**
- * Turning a session's danger level into a decision, and into rules.
- *
- * The decision the design settled on: warn and log by default, refuse only
- * where the user has said this is a production account. A tool that blocks by
- * default gets its guardrails switched off in the first week; a tool that only
- * logs never stops the incident it exists for. So the default is the one that
- * costs nothing to be wrong about, and the strict one is opt-in per session.
- *
- * Pure, so the ordering and the rule shapes are testable without a browser.
+ * ------------------------------------------------------------------
+ *  Title    |  Danger level to decision and rules
+ *  Ref      |  catalog.ts, guard.ts, audit.ts, netfilter/types.ts
+ *  ID       |  M3 (guard)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Turn a session's danger level into a decision, and into
+ *           |  block rules.
+ *  How      |  Warn and log by default, refuse only where the user
+ *           |  marked a production account. Block by default gets
+ *           |  switched off; log only never stops the incident.
+ *  Note     |  Pure, so the ordering and rule shapes are testable
+ *           |  without a browser.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import type { Rule } from '../netfilter/types.js';
@@ -28,11 +33,12 @@ export interface Decision {
 }
 
 /**
- * What to do about a request from a session at a given danger level.
- *
- * `notable` never warns and never blocks whatever the level, because it is
- * every DELETE on the web. It is recorded so that the trail is complete, and
- * that is all it is for.
+ * ------------------------------------------------------------------
+ *  Purpose  |  What to do about a request at a given danger level.
+ *  Note     |  notable never warns or blocks whatever the level; it is
+ *           |  every DELETE on the web, recorded only so the trail is
+ *           |  complete.
+ * ------------------------------------------------------------------
  */
 export function decide(
   request: { url: string; method: string },
@@ -47,22 +53,26 @@ export function decide(
 }
 
 /**
- * Rule ids for the guard live below the session block base, in their own band.
- *
- * Sharing the session's 192 would mean a session with many hosts silently
- * losing its guardrails to make room for cookies, and the failure would be
- * invisible: the rules that isolate would still be there, and the rules that
- * protect would not.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Guard rule ids live below the session block base, in
+ *           |  their own band.
+ *  Note     |  Sharing the session's block would let a session with
+ *           |  many hosts silently lose its guardrails to cookies: the
+ *           |  isolating rules stay, the protecting ones do not.
+ * ------------------------------------------------------------------
  */
 export const GUARD_ID_BASE = 100;
 export const GUARD_RULES_PER_SESSION = 32;
 
 /**
- * Where the session rule band starts. The guard's band sits below it, and the
- * two must not meet: a guard rule landing on a cookie rule's id would replace
- * it, and the session it belonged to would stop isolating with nothing
- * anywhere saying so. That is the worst failure this project has, arrived at
- * from the feature that exists to prevent bad outcomes.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Where the session rule band starts; the guard's band
+ *           |  sits below it.
+ *  Note     |  The two must not meet: a guard rule landing on a cookie
+ *           |  rule's id would replace it, and that session would stop
+ *           |  isolating with nothing saying so. The worst failure
+ *           |  here, from the feature meant to prevent bad outcomes.
+ * ------------------------------------------------------------------
  */
 export const GUARD_CAPACITY = Math.floor((1000 - GUARD_ID_BASE) / GUARD_RULES_PER_SESSION);
 
@@ -88,11 +98,13 @@ export interface GuardCompileInput {
 }
 
 /**
- * The block rules for one session.
- *
- * Scoped to the session's own tabs, never to `[-1]`: a request with no tab has
- * no confirmable owner, and refusing a service worker's request would break the
- * page with nothing to show the user and nothing for them to act on.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The block rules for one session.
+ *  Note     |  Scoped to the session's own tabs, never [-1]: a request
+ *           |  with no tab has no confirmable owner, and refusing a
+ *           |  worker's request breaks the page with nothing to act
+ *           |  on.
+ * ------------------------------------------------------------------
  */
 export function compileGuard(
   input: GuardCompileInput,

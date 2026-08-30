@@ -1,28 +1,20 @@
 /**
- * Which requests are worth stopping.
- *
- * You keep separate accounts precisely because they have different
- * consequences. Deleting a client's project from the wrong session is a real
- * incident, and no session manager addresses it, because addressing it needs
- * something they do not have: knowledge of which session a request belongs to
- * at the moment it is made. We already inspect every request and already know
- * its session, so this is nearly free.
- *
- * Two tiers, and the split is what keeps it usable.
- *
- * `notable` is anything structurally destructive. It is logged and nothing
- * else, because a DELETE is also how you remove a draft, dismiss a
- * notification and close a tab you opened by mistake. Warning on those trains
- * people to dismiss warnings.
- *
- * `destructive` is a catalogued endpoint that removes something with a blast
- * radius: a project, a repository, a database, a zone. Those warn, and in a
- * session marked for it, they are refused.
- *
- * Patterns are RE2-compatible strings rather than RegExp literals on purpose:
- * the same string is compiled here for classification and handed to
- * declarativeNetRequest as a regexFilter for enforcement, so the thing that
- * warns and the thing that blocks cannot drift apart.
+ * ------------------------------------------------------------------
+ *  Title    |  Which requests are worth stopping
+ *  Ref      |  policy.ts, guard.ts, audit.ts
+ *  ID       |  M3 (guard)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Classify a request as notable or destructive so the
+ *           |  guard can log, warn or block it.
+ *  How      |  Two tiers: notable is anything structurally
+ *           |  destructive (logged only, since a DELETE also dismisses
+ *           |  a draft); destructive is a catalogued endpoint with a
+ *           |  blast radius (warns, or refused in a marked session).
+ *  Note     |  Patterns are RE2 strings, not RegExp literals: the same
+ *           |  string classifies here and enforces in DNR, so warn and
+ *           |  block cannot drift apart.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 export type Severity = 'notable' | 'destructive';
@@ -41,12 +33,13 @@ export interface GuardEntry {
 }
 
 /**
- * Catalogued endpoints. Deliberately small and specific.
- *
- * A large catalog of guesses is worse than a small catalog of certainties: a
- * guardrail that fires on something harmless is a guardrail that gets turned
- * off. Everything not listed still lands in the audit trail through the
- * generic rules below.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Catalogued endpoints. Deliberately small and specific.
+ *  Note     |  A large catalog of guesses is worse than a small one of
+ *           |  certainties: a guardrail that fires on something
+ *           |  harmless gets turned off. Everything unlisted still
+ *           |  lands in the audit trail via the generic rules.
+ * ------------------------------------------------------------------
  */
 export const CATALOG: readonly GuardEntry[] = Object.freeze([
   {
@@ -185,12 +178,13 @@ export interface Finding {
 }
 
 /**
- * The most severe entry matching a request, or null.
- *
- * Most severe rather than first, because the generic DELETE rule matches
- * everything a catalogued DELETE rule does, and reporting "delete something"
- * where "delete a Vercel project" applies would throw away the only part the
- * user needs to make a decision.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The most severe entry matching a request, or null.
+ *  Note     |  Most severe, not first: the generic DELETE rule matches
+ *           |  everything a catalogued one does, and "delete
+ *           |  something" where "delete a Vercel project" applies
+ *           |  throws away what the user needs to decide.
+ * ------------------------------------------------------------------
  */
 export function classify(
   request: { url: string; method: string },
