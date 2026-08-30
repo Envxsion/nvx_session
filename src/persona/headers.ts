@@ -1,42 +1,26 @@
 /**
- * The request headers that have to agree with the patched navigator.
- *
- * Every other surface the mask touches is answerable inside the page. This one
- * is not: `navigator.userAgent` and the `User-Agent` header are two reports of
- * the same fact, and a page that reads one while its own origin reads the other
- * can be handed a contradiction by any server that cares to look. Rewriting the
- * page alone would manufacture exactly the incoherence the mask exists to
- * prevent, which is why this is compiled next to the mask rather than after it.
- *
- * Four decisions, each of which was a wrong answer first.
- *
- * Scope follows the mask exactly. The mask is registered for the hosts sessions
- * care about, so those are the hosts whose headers move, and both come from one
- * call in the worker for the reason that they must never be derived separately.
- *
- * Navigations are matched by where they are going and subresources by where
- * they came from. A navigation produces a document, and that document is masked
- * only when its own url matches, so `requestDomains` is the honest condition. A
- * subresource produces no document at all: its `User-Agent` is the fetching
- * document's, so it must move whenever the fetching document is masked and
- * wherever it is going, which is `initiatorDomains`. Conditioning subresources
- * on their destination instead would leave every third party a masked page
- * touches reading the real browser, and conditioning navigations on their
- * initiator would rewrite the headers of an unmasked iframe inside a masked
- * page, which is the same contradiction pointing the other way.
- *
- * Client hints are sent to potentially trustworthy origins, not to https. That
- * was measured rather than assumed, and the assumption was wrong: Chromium
- * sends `Sec-CH-UA` to `http://localhost` and `http://127.0.0.1`. A rule gated
- * on the scheme would have left the real brand list on the wire next to a
- * normalised user agent on exactly the origin the suite runs against.
- *
- * The high entropy brand hints are removed rather than replaced, and this is the
- * one place here that is a trade rather than a right answer. `set` in this API
- * is unconditional, so replacing them would send hints to every origin that
- * never asked for any, which no browser does and which announces itself. A hint
- * that was asked for and not answered is the smaller anomaly, and it is one a
- * permissions policy can produce on its own.
+ * ------------------------------------------------------------------
+ *  Title    |  Posture request headers
+ *  Ref      |  netfilter/types.ts, useragent.ts, compilePosture
+ *  ID       |  M3 (fingerprint)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rewrite the request headers that have to agree with the
+ *           |  patched navigator.
+ *  How      |  `navigator.userAgent` and the `User-Agent` header are
+ *           |  two reports of one fact, so rewriting the page alone
+ *           |  would manufacture the incoherence the mask prevents.
+ *           |  Compiled next to the mask, from one worker call.
+ *  Note     |  Four decisions, each a wrong answer first. Scope follows
+ *           |  the mask. Navigations match on destination
+ *           |  (`requestDomains`), subresources on initiator
+ *           |  (`initiatorDomains`), since a subresource carries the
+ *           |  fetching document's UA. Client hints go to potentially
+ *           |  trustworthy origins, not just https: Chromium sends
+ *           |  `Sec-CH-UA` to `http://localhost`. High entropy brand
+ *           |  hints are removed rather than replaced, because `set` is
+ *           |  unconditional and would send hints no origin asked for.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import type { Rule } from '../netfilter/types.js';
@@ -44,9 +28,12 @@ import type { Brand } from './useragent.js';
 import { secChUa } from './useragent.js';
 
 /**
- * Rule ids for the posture live below the guard's band, which starts at 100.
- * The three bands must not meet: an id collision replaces a rule rather than
- * adding one, and the replaced rule fails silently.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rule ids for the posture, below the guard's band at 100.
+ *  Note     |  The bands must not meet: an id collision replaces a rule
+ *           |  rather than adding one, and the replaced rule fails
+ *           |  silently.
+ * ------------------------------------------------------------------
  */
 export const POSTURE_ID_BASE = 10;
 export const POSTURE_RULES = 16;
@@ -56,25 +43,28 @@ export function postureIds(): number[] {
 }
 
 /**
- * How many hosts one rule's condition will carry.
- *
- * The API caps the domain lists, and a rule that exceeds the cap is rejected
- * whole, which would take the header rewrite off for every host rather than the
- * ones past the line. Well above any real session count, and reported when it
- * bites rather than silently trimmed.
+ * ------------------------------------------------------------------
+ *  Purpose  |  How many hosts one rule's condition will carry.
+ *  Note     |  The API caps the domain lists and rejects an oversized
+ *           |  rule whole, which would take the header rewrite off for
+ *           |  every host. Well above any real session count, and
+ *           |  reported when it bites rather than silently trimmed.
+ * ------------------------------------------------------------------
  */
 export const MAX_POSTURE_HOSTS = 250;
 
 /**
- * Where the browser sends client hints.
- *
- * Not a special case for a site: this is the platform's own potentially
- * trustworthy origin rule, which hint delivery follows and which https alone
- * does not describe. The trailing `^` is the API's separator class, matching
- * anything that is not a hostname character, so `|http://localhost^` covers
- * `http://localhost/` and `http://localhost:8787/` without also covering
- * `http://localhost.example.com/`, which is an ordinary insecure origin that
- * happens to start the same way.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Where the browser sends client hints.
+ *  How      |  The platform's own potentially-trustworthy origin rule,
+ *           |  which hint delivery follows and https alone does not
+ *           |  describe.
+ *  Note     |  The trailing `^` is the API's separator class, so
+ *           |  `|http://localhost^` covers `http://localhost/` and
+ *           |  `http://localhost:8787/` but not
+ *           |  `http://localhost.example.com/`, an ordinary insecure
+ *           |  origin that starts the same way.
+ * ------------------------------------------------------------------
  */
 const HINTED_ORIGINS = ['|https://', '|http://localhost^', '|http://127.0.0.1^', '|http://[::1]^'];
 

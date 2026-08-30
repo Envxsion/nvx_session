@@ -1,14 +1,18 @@
 /**
- * Descriptor to patch bundle.
- *
- * The bundle is plain data with no behaviour, because the thing that consumes it
- * runs in the MAIN world of a page and may not import anything. Everything that
- * needs thinking about happens here, where it can be tested; the mask applies
- * what it is given and makes no decisions of its own.
- *
- * One surface is compiled today. The others are described in the persona,
- * validated for coherence, and reported as unapplied, which is the honest shape
- * for a thing being built a slice at a time. See `applied` in the bundle.
+ * ------------------------------------------------------------------
+ *  Title    |  Descriptor to patch bundle
+ *  Ref      |  noise.ts, useragent.ts, types.ts, standardFor, compile
+ *  ID       |  M3 (fingerprint)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Turn a persona descriptor into a plain-data patch
+ *           |  bundle the mask applies.
+ *  How      |  The bundle has no behaviour: the mask runs in a page's
+ *           |  MAIN world and may not import anything, so every decision
+ *           |  is made and tested here.
+ *  Note     |  Surfaces that are described but not patched are reported
+ *           |  as unapplied. See `applied` in the bundle.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { surfaceSeed } from './noise.js';
@@ -16,71 +20,62 @@ import { canNormalise, standardBrands, standardUserAgent, type Brand } from './u
 import type { Os, PatchBundle, Persona, Posture, Surface } from './types.js';
 
 /**
- * How sparse the canvas noise is.
- *
- * One eligible pixel in 97 carries a change of at most one level on one channel.
- * The numbers are a compromise between two failure modes that pull opposite
- * ways. Too dense and the cost is measurable, which section 11 lists as its own
- * detection vector: full frame noise on a large canvas shows up in timing.  Too
- * sparse and a small probe canvas, and fingerprinting probes are small, comes
- * back untouched, which is the same as not being installed.
- *
- * 97 is prime so it cannot fall into step with a repeating pattern in the image
- * or with a canvas whose width shares a factor with the stride. At the 220 by 30
- * the common probes use, this touches something on the order of sixty pixels,
- * which is plenty to move a hash and far below anything an eye resolves.
+ * ------------------------------------------------------------------
+ *  Purpose  |  How sparse the canvas noise is.
+ *  How      |  One eligible pixel in 97 carries a change of at most one
+ *           |  level on one channel, a compromise between two failures:
+ *           |  too dense costs measurable time (a section 11 vector),
+ *           |  too sparse leaves a small probe canvas untouched.
+ *  Note     |  97 is prime so it cannot fall into step with a repeating
+ *           |  pattern or a canvas width sharing a factor with the
+ *           |  stride. On a 220 by 30 probe this touches ~60 pixels,
+ *           |  enough to move a hash, below what an eye resolves.
+ * ------------------------------------------------------------------
  */
 export const CANVAS_STRIDE = 97;
 export const CANVAS_BITS = 1;
 
 /**
- * Audio, which needs a different shape of number.
- *
- * The bits are mantissa bits, so the change is relative: a touched sample moves
- * by roughly one part in two thousand whatever its magnitude, which is about
- * sixty six decibels down and inaudible everywhere in the buffer rather than
- * only where it happens to be quiet.
- *
- * The stride is tighter than the canvas one because an audio fingerprint
- * usually reduces the whole buffer to a single sum, and a change to one sample
- * in ninety seven of a quiet render can round away entirely. Forty four
- * thousand samples at one in seventeen is still well under three thousand
- * touched, which costs nothing.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Audio noise, which needs a different shape of number.
+ *  How      |  The bits are mantissa bits, so the change is relative:
+ *           |  a touched sample moves ~one part in two thousand, about
+ *           |  sixty six dB down and inaudible everywhere in the buffer.
+ *  Note     |  The stride is tighter than the canvas one because an
+ *           |  audio fingerprint usually sums the whole buffer, so a
+ *           |  change in a quiet render can round away. 44k samples at
+ *           |  one in 17 is still under 3000 touched, which costs
+ *           |  nothing.
+ * ------------------------------------------------------------------
  */
 export const AUDIO_STRIDE = 17;
 export const AUDIO_BITS = 12;
 
 /**
- * The shared bucket.
- *
- * Standardize puts every session on one normalised machine. The seed being a
- * published constant is not a weakness, it is the entire mechanism: a bucket
- * only lowers uniqueness if everybody in it lands in the same place, and a
- * per-install random seed would give every user their own stable fingerprint,
- * which is worse than doing nothing. That is the difference between this and
- * Persona, where the seed is per session and must not be guessable.
- *
- * The machine described is deliberately dull: the most common desktop
- * configuration there is. A bucket that nobody else is in is not a bucket.
- *
- * Two fields are the real machine's rather than the bucket's, and it matters
- * why. Timezone and locale are checked against the exit IP by anybody who cares,
- * and a Melbourne address reporting a London clock is exactly the incoherence
- * this whole design exists to avoid. So the bucket does not fabricate them, and
- * `standardFor` takes them from the browser it is running on.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The Standardize bucket: one normalised machine shared
+ *           |  across every session.
+ *  How      |  The seed is a published constant on purpose. A bucket
+ *           |  only lowers uniqueness if everybody in it lands in the
+ *           |  same place, so a per-install random seed would be worse
+ *           |  than nothing. The machine described is the most common
+ *           |  desktop configuration there is.
+ *  Note     |  Timezone and locale are the real machine's, not the
+ *           |  bucket's: they are checked against the exit IP, so
+ *           |  `standardFor` takes them from the running browser rather
+ *           |  than fabricating them.
+ * ------------------------------------------------------------------
  */
 /**
- * One bucket per operating system, and the reason there is not just one.
- *
- * A single bucket would have to pick an OS, and claiming a different one than
- * the machine actually runs is exactly what the validator refuses below tier 2:
- * request headers can be rewritten but client hint availability is negotiated
- * per origin, so the headers and the page would disagree. Presenting Windows to
- * every Mac user would be incoherence introduced by the feature meant to prevent
- * it.
- *
- * Three buckets is still a bucket. What matters is that everybody on the same
- * OS lands in the same place, not that everybody lands in one place.
+ * ------------------------------------------------------------------
+ *  Purpose  |  One bucket per operating system, not one global bucket.
+ *  Note     |  A single bucket would have to claim an OS the machine
+ *           |  may not run, which the validator refuses below tier 2:
+ *           |  headers can be rewritten but client hint availability is
+ *           |  negotiated per origin, so headers and page would
+ *           |  disagree. What matters is everybody on the same OS lands
+ *           |  in the same place.
+ * ------------------------------------------------------------------
  */
 export const BUCKETS: Record<
   Os,
@@ -107,38 +102,21 @@ export const BUCKETS: Record<
 };
 
 /**
- * The graphics card, which is bucketed by vendor rather than across vendors, and
- * the reason is a defect this had until it was measured.
- *
- * The first form put one card per operating system: every Windows machine
- * reported an RTX 3060. Probing WebGPU on an AMD laptop showed what that
- * actually produces. `navigator.gpu` reports `vendor: "amd"`,
- * `architecture: "rdna-3"` and AMD subgroup sizes, untouched, because WebGPU is
- * not masked. So the page claimed NVIDIA in one API and AMD in another, which is
- * a contradiction a single line of script finds, and it is worse than not
- * masking at all.
- *
- * The vendor is corroborated in too many places to fake at this tier. WebGPU
- * names it. The WebGL capability limits are shaped by it: viewport dimensions,
- * point size range, uniform vector counts. So is the supported extension list,
- * and so is shader precision. Faking the vendor means faking all of those or
- * being caught by any one of them, which is the same argument that made the
- * operating system bucket per OS rather than global.
- *
- * So the vendor stays, and what gets normalised is the model, which is where
- * nearly all of the entropy is anyway: the machine this was written on reports
- * an "AMD Radeon(TM) 8060S Graphics (0x00001586)", an uncommon integrated part
- * carrying its PCI device id in the string. A common card of the same vendor is
- * a real bucket.
- *
- * A combination not in this table leaves the strings alone. That is deliberate
- * rather than a gap: these strings have an exact format per platform, and one
- * invented badly is its own tell, so nothing is claimed where it cannot be
- * claimed with confidence. The five here cover the overwhelming majority of
- * desktops.
- *
- * `src/mask/index.ts` carries a copy, because it has to choose synchronously
- * with no channel to ask over. `tests/persona.test.ts` holds the two together.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The graphics card bucket, keyed by vendor rather than
+ *           |  across vendors, normalising only the model.
+ *  Bug-Fix  |  The first form put one card per OS (every Windows
+ *           |  machine an RTX 3060). WebGPU is not masked and reports
+ *           |  the real vendor untouched, so the page claimed NVIDIA in
+ *           |  one API and AMD in another, worse than not masking.
+ *  Note     |  The vendor is corroborated in too many places to fake
+ *           |  (WebGPU, WebGL limits, extension list, shader
+ *           |  precision), so it stays and only the model moves, where
+ *           |  nearly all the entropy is. A combination not in the
+ *           |  table is left alone rather than invented badly.
+ *           |  `src/mask/index.ts` carries a copy;
+ *           |  `tests/persona.test.ts` holds the two together.
+ * ------------------------------------------------------------------
  */
 export type GpuVendor = 'nvidia' | 'amd' | 'intel' | 'apple';
 
@@ -166,15 +144,16 @@ export const CARDS: Record<string, { vendor: string; renderer: string }> = {
 };
 
 /**
- * Which vendor made the card a renderer string describes.
- *
- * Read from the real string rather than from the operating system, because the
- * operating system does not decide it: a Windows machine can be any of three and
- * a Mac can be two.
- *
- * Order matters. An Apple Silicon renderer says both "Apple" and "Metal", and an
- * ANGLE Metal string on an Intel Mac says "Metal" while naming Intel, so Apple is
- * tested on its own token rather than on the backend.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Which vendor made the card a renderer string describes.
+ *  How      |  Read from the real string, not the OS, which does not
+ *           |  decide it: a Windows machine can be any of three and a
+ *           |  Mac can be two.
+ *  Note     |  Order matters. An Apple Silicon renderer says both
+ *           |  "Apple" and "Metal", and an ANGLE Metal string on an
+ *           |  Intel Mac says "Metal" while naming Intel, so Apple is
+ *           |  tested on its own token rather than the backend.
+ * ------------------------------------------------------------------
  */
 export function vendorOf(renderer: string): GpuVendor | null {
   if (/\bapple\b/i.test(renderer)) return 'apple';
@@ -185,8 +164,11 @@ export function vendorOf(renderer: string): GpuVendor | null {
 }
 
 /**
- * The card to present, given the machine's real one. Null leaves it alone,
- * which is the answer for any combination this cannot state with confidence.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The card to present, given the machine's real one.
+ *  Note     |  Null leaves it alone, the answer for any combination
+ *           |  this cannot state with confidence.
+ * ------------------------------------------------------------------
  */
 export function cardFor(os: Os, realRenderer: string): { vendor: string; renderer: string } | null {
   const vendor = vendorOf(realRenderer);
@@ -195,14 +177,16 @@ export function cardFor(os: Os, realRenderer: string): { vendor: string; rendere
 }
 
 /**
- * What the bucket takes from the machine rather than inventing.
- *
- * Timezone and locale, because they are checked against the exit IP by anybody
- * who cares. And now the user agent and its brand list, for a different reason:
- * the normalised form is the real one with the browser's own name taken out of
- * it, so the Chromium version stays true. A written down user agent is correct
- * for one release and a contradiction afterwards, since the browser still has
- * the features of the version it actually is. See `useragent.ts`.
+ * ------------------------------------------------------------------
+ *  Purpose  |  What the bucket takes from the machine rather than
+ *           |  inventing.
+ *  Note     |  Timezone and locale, checked against the exit IP. And
+ *           |  the user agent and brand list: the normalised form is
+ *           |  the real one with the browser's own name removed, so the
+ *           |  Chromium version stays true. A written-down user agent
+ *           |  is correct for one release, a contradiction after. See
+ *           |  `useragent.ts`.
+ * ------------------------------------------------------------------
  */
 export interface RealMachine {
   os: Os;
@@ -327,12 +311,13 @@ export function compile(persona: Persona, posture: Posture): PatchBundle {
 }
 
 /**
- * Surfaces the section 10 table names and this build does not patch yet.
- *
- * Exported so the panel and the manual can read it rather than restate it. The
- * one thing worse than an unfinished surface is a settings screen implying it is
- * finished, which is the same rule the storage panel already follows when it
- * reports an origin as shared.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Surfaces the section 10 table names and this build does
+ *           |  not patch yet.
+ *  Note     |  Exported so the panel and manual read it rather than
+ *           |  restate it. A settings screen implying an unfinished
+ *           |  surface is finished is worse than the gap itself.
+ * ------------------------------------------------------------------
  */
 export const UNAPPLIED: Array<{ surface: string; why: string }> = [
   {

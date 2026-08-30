@@ -1,42 +1,24 @@
 /**
- * The installed speech voice list, which is the strongest operating system tell
- * left in the page.
- *
- * It was not in the applied table at all until the table was re-read rather than
- * trusted, and it is worth more than it looks. The machine this was written on
- * reports `Microsoft David`, `Mark` and `Zira` for en-US and `James` and
- * `Catherine` for en-AU. The first three ship with every English Windows. The
- * last two are an installed Australian language pack, and that is the part worth
- * removing: it is a fact about the machine that nothing else the page can see
- * would predict.
- *
- * So the rule is to keep what is already predictable and drop what is not. A
- * voice whose language the browser already advertises in `navigator.languages`
- * tells a page nothing it could not read from the `Accept-Language` header it
- * just sent. A voice for a language the browser never claims to read is an
- * optional pack, and those are what make one machine distinguishable from the
- * next.
- *
- * Three things this deliberately does not do.
- *
- * It never fabricates a voice. `SpeechSynthesisVoice` has no constructor, so a
- * made up list would be plain objects with the wrong prototype, which is a one
- * line find and would break `speak`. Everything returned is an object the
- * browser made.
- *
- * It writes no voice name down. A written down list ages with the operating
- * system exactly the way a written down user agent does, and for the same
- * reason: it is correct on the day it is typed.
- *
- * And it never hides the default voice, even when its language does not match.
- * The default is what a page reaches for when it has no preference, so removing
- * it changes what the machine sounds like rather than what it reveals.
- *
- * Returning an empty list would be safe even so: `getVoices` already returns
- * nothing until the list has loaded, which is the entire reason
- * `onvoiceschanged` exists, so every page that uses this already handles it.
- *
- * Copied into `src/mask/index.ts` and held there by test.
+ * ------------------------------------------------------------------
+ *  Title    |  Speech voice list
+ *  Ref      |  keepVoices, navigator.languages, mask/index.ts
+ *  ID       |  M3 (fingerprint)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Trim the installed speech voice list, the strongest OS
+ *           |  tell left in the page.
+ *  How      |  Keep what is already predictable and drop what is not. A
+ *           |  voice whose language the browser already advertises
+ *           |  reveals nothing; a voice for a language it never claims
+ *           |  is an optional pack, which is what distinguishes one
+ *           |  machine from the next.
+ *  Note     |  Never fabricates a voice (`SpeechSynthesisVoice` has no
+ *           |  constructor), writes no name down (a list ages like a
+ *           |  UA), and never hides the default even when its language
+ *           |  does not match. An empty list is safe too, since
+ *           |  `getVoices` returns nothing until loaded. Copied into
+ *           |  `src/mask/index.ts` and held by test.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 export interface Voice {

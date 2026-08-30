@@ -1,26 +1,31 @@
 /**
- * What a fingerprint posture is, as data.
- *
- * A persona is a declarative description of one coherent machine. It is never
- * executed and never touches a browser API: the compiler in `compile.ts` turns
- * it into a patch bundle, and the mask in `src/mask/` applies whatever bundle it
- * is handed. Keeping those apart is what makes surface coverage auditable, and
- * it is the only reason any of this is testable without a browser.
- *
- * The descriptor carries the whole of the section 10 table even though only
- * canvas is compiled today. That is deliberate rather than aspirational: the
- * validator's entire job is checking a machine for internal contradiction, and
- * it cannot do that against a descriptor that only holds one surface. What must
- * not happen is the product implying it applies a field it merely stores, which
- * is why the compiled bundle carries an explicit `applied` list and every
- * surface absent from it is reported as unhandled rather than quietly assumed.
+ * ------------------------------------------------------------------
+ *  Title    |  The persona descriptor
+ *  Ref      |  compile.ts, src/mask/, Posture, PatchBundle
+ *  ID       |  M3 (fingerprint)
+ * ------------------------------------------------------------------
+ *  Purpose  |  What a fingerprint posture is, as data.
+ *  How      |  A persona is a declarative description of one coherent
+ *           |  machine, never executed. The compiler turns it into a
+ *           |  patch bundle and the mask applies it, which keeps surface
+ *           |  coverage auditable and testable without a browser.
+ *  Note     |  The descriptor carries the whole section 10 table though
+ *           |  only some surfaces compile, so the validator can check
+ *           |  for internal contradiction. The bundle carries an
+ *           |  explicit `applied` list; any surface absent is reported
+ *           |  as unhandled rather than assumed.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 /**
- * Mirror is the shipped default and fabricates nothing. Standardize puts every
- * session on one shared normalised machine, which lowers uniqueness across the
- * whole population running it. Persona gives each session its own coherent
- * machine, seeded so it never changes.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The three fingerprint postures.
+ *  Note     |  Mirror is the shipped default and fabricates nothing.
+ *           |  Standardize puts every session on one shared normalised
+ *           |  machine, lowering uniqueness across the population.
+ *           |  Persona is the per-session posture (Pro).
+ * ------------------------------------------------------------------
  */
 export type Posture = 'mirror' | 'standardize' | 'persona';
 
@@ -88,11 +93,13 @@ export interface Persona {
 }
 
 /**
- * Canvas noise parameters.
- *
- * Sub-perceptual and sparse. Full frame per pixel noise is measurably slow on a
- * large canvas, and timing is itself a detection vector, so one pixel in
- * `stride` is touched and the choice of which is a pure function of position.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Canvas noise parameters.
+ *  Note     |  Sub-perceptual and sparse. Full frame per-pixel noise is
+ *           |  measurably slow on a large canvas and timing is itself a
+ *           |  detection vector, so one pixel in `stride` is touched and
+ *           |  which is a pure function of position.
+ * ------------------------------------------------------------------
  */
 export interface CanvasPatch {
   /** 32 bit, derived from the persona seed and the surface name. */
@@ -108,16 +115,16 @@ export interface CanvasPatch {
 }
 
 /**
- * WebGL, which is two separate lies with different failure modes.
- *
- * The strings are what `getParameter` reports for the vendor and renderer, and
- * they are the single most read fingerprint value after the canvas. They have to
- * match the claimed OS: an Apple GPU on a Windows platform is the textbook
- * incoherence, and the validator refuses it.
- *
- * The pixels are `readPixels`, which is what a WebGL fingerprint hash actually
- * consumes, and they take the same seeded sparse treatment as the 2D canvas for
- * the same reasons.
+ * ------------------------------------------------------------------
+ *  Purpose  |  WebGL, two separate changes with different failure
+ *           |  modes.
+ *  Note     |  The strings are what `getParameter` reports for vendor
+ *           |  and renderer, the most read fingerprint after the canvas,
+ *           |  and must match the claimed OS: an Apple GPU on a Windows
+ *           |  platform is the textbook incoherence the validator
+ *           |  refuses. The pixels are `readPixels`, given the same
+ *           |  seeded sparse treatment as the 2D canvas.
+ * ------------------------------------------------------------------
  */
 export interface WebglPatch {
   seed: number;
@@ -137,13 +144,14 @@ export interface WebglPatch {
 }
 
 /**
- * Audio.
- *
- * `bits` counts mantissa bits rather than whole levels, so the change is
- * relative rather than absolute: a loud sample moves more in magnitude than a
- * quiet one and both move by the same proportion, which is what keeps it below
- * hearing everywhere in the buffer rather than only where it happens to be
- * quiet.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Audio noise parameters.
+ *  Note     |  `bits` counts mantissa bits rather than whole levels, so
+ *           |  the change is relative: a loud sample moves more in
+ *           |  magnitude than a quiet one and both by the same
+ *           |  proportion, which keeps it below hearing everywhere in
+ *           |  the buffer.
+ * ------------------------------------------------------------------
  */
 export interface AudioPatch {
   seed: number;
@@ -152,24 +160,18 @@ export interface AudioPatch {
 }
 
 /**
- * The navigator, which is four fields and four arguments for stopping there.
- *
- * `userAgent` and `brands` are the browser's own name, and normalising them is
- * the whole point: they are the fields that put an Opera or an Edge user in a
- * bucket of one. `appVersion` is not listed because it is the user agent minus
- * its prefix and is derived rather than chosen; leaving it real while the user
- * agent moves is a one line contradiction.
- *
- * `cores` and `memory` are bucketed counts with no counterpart anywhere else in
- * the platform, so normalising them cannot contradict anything. The most a page
- * loses is sizing a worker pool to the wrong number.
- *
- * What is deliberately absent is `maxTouchPoints`, and the reason is the same
- * one that keeps the screen out of this build entirely. Touch capability is
- * readable from CSS through `(any-pointer: coarse)`, which the engine evaluates
- * and a content script cannot reach, so a navigator claiming no touch on a
- * machine whose stylesheet says otherwise is a contradiction manufactured by
- * the mask. A real value nobody masked is better than that.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The navigator, four fields and four reasons for stopping
+ *           |  there.
+ *  Note     |  `userAgent` and `brands` are the browser's own name, the
+ *           |  fields that put an Opera or Edge user in a bucket of one.
+ *           |  `appVersion` is derived from the user agent, so leaving
+ *           |  it real would contradict. `cores` and `memory` are
+ *           |  bucketed counts with no counterpart to contradict.
+ *           |  `maxTouchPoints` is absent because touch is readable from
+ *           |  CSS the mask cannot reach, so claiming no touch would be
+ *           |  a contradiction it manufactures.
+ * ------------------------------------------------------------------
  */
 export interface NavigatorPatch {
   /** Empty means leave it alone, which is what an unrecognised browser gets. */

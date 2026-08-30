@@ -1,10 +1,18 @@
 /**
- * Capturing Set-Cookie without letting it reach the profile jar.
- *
- * Confirmed by the M0 probe on both Chrome 151 and Opera 134: a non-blocking
- * onHeadersReceived listener with extraHeaders still sees Set-Cookie even when
- * a rule removes it from the response. So capture and suppress can both run,
- * and the reconcile fallback in Spike 1 is not needed.
+ * ------------------------------------------------------------------
+ *  Title    |  Set-Cookie capture
+ *  Ref      |  jar/cookie.ts, jar/psl.ts, captureSetCookie, contextFor
+ *  ID       |  M2 (observer)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Capture Set-Cookie from responses without letting it
+ *           |  reach the profile jar.
+ *  How      |  A non-blocking onHeadersReceived listener with
+ *           |  extraHeaders still sees Set-Cookie even when a rule
+ *           |  removes it, so capture and suppress both run.
+ *  Note     |  Confirmed by the M0 probe on Chrome 151 and Opera 134,
+ *           |  so the Spike 1 reconcile fallback is not needed.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { parseSetCookie, type Cookie, type ParseFailure } from '../jar/cookie.js';
@@ -35,8 +43,11 @@ export interface CaptureResult {
 const EMPTY: CaptureResult = Object.freeze({ cookies: [], rejected: [], domains: [] });
 
 /**
- * Only http and https carry cookies. Skipping everything else early keeps the
- * observer off the hot path for extension pages, data URLs and blobs.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Only http and https carry cookies.
+ *  Note     |  Skipping everything else early keeps the observer off
+ *           |  the hot path for extension pages, data URLs and blobs.
+ * ------------------------------------------------------------------
  */
 export function capturable(url: string): boolean {
   return url.startsWith('https://') || url.startsWith('http://');
@@ -90,9 +101,13 @@ function truncate(s: string): string {
 }
 
 /**
- * Which emission context a request belongs to, derived from what webRequest
- * reports. This has to agree with the rule variant the compiler produced for
- * the same request, or desync detection reports phantom mismatches.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Which emission context a request belongs to, from what
+ *           |  webRequest reports.
+ *  Note     |  Must agree with the rule variant the compiler produced
+ *           |  for the same request, or desync detection reports
+ *           |  phantom mismatches.
+ * ------------------------------------------------------------------
  */
 export function contextFor(details: {
   type?: string;

@@ -1,29 +1,32 @@
 /**
- * Seeded canvas noise.
- *
- * The determinism rule from section 03: a fingerprint surface returns the same
- * value for the same input for the lifetime of the session. Per call
- * randomisation is the single easiest way to be caught, because the probe is
- * `toDataURL()` twice and a diff. So there is no randomness here at all. Every
- * value is a pure function of the seed and the pixel's position, which makes it
- * stable across reloads, restarts and windows for free rather than by keeping
- * state anywhere.
- *
- * This file is the reference implementation. `src/mask/index.ts` carries a byte
- * for byte copy of `mix32` and `applyCanvasNoise`, because a MAIN world content
- * script is a classic script and cannot import anything, and because section 17
- * requires zero dependencies in the mask: every byte in that world is detection
- * surface. `tests/persona.test.ts` asserts the two agree rather than trusting
- * them to, the same arrangement `src/store/keys.ts` has with the storage shim.
+ * ------------------------------------------------------------------
+ *  Title    |  Seeded canvas and audio noise
+ *  Ref      |  mix32, applyCanvasNoise, applyAudioNoise, mask/index.ts
+ *  ID       |  M3 (fingerprint)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Sub-perceptual, deterministic noise for fingerprint
+ *           |  surfaces.
+ *  How      |  A surface returns the same value for the same input for
+ *           |  the session's life, so there is no randomness: every
+ *           |  value is a pure function of seed and position, stable
+ *           |  across reloads and restarts for free.
+ *  Note     |  The reference implementation. `src/mask/index.ts`
+ *           |  carries a byte-for-byte copy, because a MAIN world
+ *           |  classic script cannot import, and
+ *           |  `tests/persona.test.ts` asserts the two agree.
+ *  Author   |  Ojas Kekre, 17/08/2026
+ * ------------------------------------------------------------------
  */
 
 /**
- * A 32 bit mix of a seed and a coordinate pair.
- *
- * Not a hash for any security purpose. It has to be cheap, stable across
- * engines, and spread three small integers over the word well enough that
- * neighbouring pixels do not correlate. `Math.imul` rather than `*` because
- * multiplying past 2^53 silently loses the low bits that carry the mixing.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A 32 bit mix of a seed and a coordinate pair.
+ *  Note     |  Not a hash for any security purpose. It must be cheap,
+ *           |  stable across engines, and spread three small integers
+ *           |  over the word so neighbouring pixels do not correlate.
+ *           |  `Math.imul` not `*`, since multiplying past 2^53 loses
+ *           |  the low bits that carry the mixing.
+ * ------------------------------------------------------------------
  */
 export function mix32(seed: number, x: number, y: number): number {
   let h = (seed ^ 0x9e3779b9) >>> 0;
@@ -36,27 +39,19 @@ export function mix32(seed: number, x: number, y: number): number {
 }
 
 /**
- * The same idea applied to audio samples.
- *
- * Audio fingerprinting renders an oscillator through a compressor in an
- * `OfflineAudioContext` and hashes the samples, or reads an `AnalyserNode`. The
- * output is float rather than byte, so "replace the low bits" needs a different
- * handle: the mantissa. Viewing the buffer as unsigned words and forcing the low
- * bits of each touched sample changes it by a relative epsilon, which is
- * idempotent for the same reason the canvas version is, and inaudible by
- * construction rather than by choosing a small number.
- *
- * Two kinds of sample are skipped, and both matter.
- *
- * Anything not finite. An infinity has an all ones exponent and a zero mantissa,
- * so writing bits into it produces a NaN, which would turn a loud sample into a
- * broken one rather than a slightly different one.
- *
- * And exact zero. Silence is genuinely common in an audio buffer, a freshly
- * constructed one is entirely zero, and forcing bits into a zero makes a
- * denormal around 1e-45. Inaudible, but a page that allocates a buffer and reads
- * it straight back would find it non-zero, which is a tell for nothing gained:
- * silence carries no fingerprint.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The same idea applied to audio samples.
+ *  How      |  The output is float, so the handle is the mantissa:
+ *           |  viewing the buffer as unsigned words and forcing the low
+ *           |  bits of a touched sample changes it by a relative
+ *           |  epsilon, idempotent like the canvas version and
+ *           |  inaudible by construction.
+ *  Note     |  Two samples are skipped. Anything not finite, since
+ *           |  writing bits into an infinity makes a NaN. And exact
+ *           |  zero, since silence is common and forcing bits makes a
+ *           |  denormal a buffer read straight back would find non-zero,
+ *           |  a tell for nothing gained.
+ * ------------------------------------------------------------------
  */
 export function applyAudioNoise(
   data: Float32Array,
@@ -95,13 +90,16 @@ export function applyAudioNoise(
 }
 
 /**
- * A 32 bit seed for one surface, from the persona's seed material.
- *
- * FNV-1a, which is the right size of tool for turning a string into a number
- * deterministically. Section 10 specifies HKDF over the session key, and that is
- * what supplies `material` once Persona lands; this is the mixing step after it,
- * and is not itself a key derivation. Naming both parts here so nobody later
- * reads this as the security boundary, because it is not one.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A 32 bit seed for one surface, from the persona's seed
+ *           |  material.
+ *  How      |  FNV-1a, the right size of tool for turning a string into
+ *           |  a number deterministically. This is the mixing step
+ *           |  after the key derivation that supplies `material`, not
+ *           |  itself a key derivation.
+ *  Note     |  Not the security boundary, so nobody later reads it as
+ *           |  one.
+ * ------------------------------------------------------------------
  */
 export function surfaceSeed(material: string, surface: string): number {
   const s = `${material}/${surface}`;
@@ -114,26 +112,19 @@ export function surfaceSeed(material: string, surface: string): number {
 }
 
 /**
- * Rewrites the low bits of a sparse, seeded subset of pixels, in place, and
- * reports how many it changed.
- *
- * Three rules that look like details and are not.
- *
- * It replaces low bits rather than adding to them, which makes it idempotent:
- * running it twice gives the same buffer as running it once. That is not
- * tidiness, it is a coherence requirement. A site can read a canvas two ways,
- * `getImageData` directly, or `toDataURL` decoded back into a canvas and read.
- * On a real machine those agree. With additive noise they cannot, because the
- * second path is noised on the way out and again on the way back in, and the
- * disagreement is a signal nothing on a real machine produces. Forcing bits to
- * a seeded value survives the round trip unchanged.
- *
- * Fully transparent pixels are skipped. Their colour channels do not survive a
- * PNG encode, so perturbing one changes what `getImageData` returns and not what
- * `toDataURL` produces, which is the same disagreement by another route.
- *
- * And a pixel whose bits already match is left alone and not counted, so the
- * touched count means pixels actually changed rather than pixels considered.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rewrite the low bits of a sparse, seeded subset of
+ *           |  pixels in place, and report how many changed.
+ *  How      |  It replaces low bits rather than adding, so it is
+ *           |  idempotent, which is a coherence requirement: a site can
+ *           |  read a canvas via `getImageData` or via `toDataURL`
+ *           |  decoded back, and additive noise makes the two disagree
+ *           |  in a way no real machine does.
+ *  Note     |  Fully transparent pixels are skipped, since their colour
+ *           |  channels do not survive a PNG encode. A pixel whose bits
+ *           |  already match is left alone and not counted, so the
+ *           |  count means pixels changed, not pixels considered.
+ * ------------------------------------------------------------------
  */
 export function applyCanvasNoise(
   data: Uint8ClampedArray | number[],

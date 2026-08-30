@@ -1,14 +1,19 @@
 /**
- * Desync detection.
- *
- * Rule updates are asynchronous, so a request can leave between a cookie
- * changing and its rule landing. Rather than try to eliminate that, detect it:
- * compare the Cookie header a request actually carried against what the jar
- * says it should have carried, and report the difference.
- *
- * The counter this produces is the single number that says whether isolation
- * is working. It should sit at zero. Anything else is either a real leak or a
- * race worth understanding, and both are invisible without this.
+ * ------------------------------------------------------------------
+ *  Title    |  Desync detection
+ *  Ref      |  jar/emit.ts, compare, DesyncLog
+ *  ID       |  M2 (observer)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Detect when a request's Cookie header disagrees with
+ *           |  what the jar says it should have carried.
+ *  How      |  Rule updates are async, so a request can leave between a
+ *           |  cookie changing and its rule landing. Compare sent
+ *           |  against expected and report the difference.
+ *  Note     |  The count should sit at zero. Anything else is a real
+ *           |  leak or a race worth understanding, both invisible
+ *           |  without this.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import type { EmitContext } from '../jar/emit.js';
@@ -39,9 +44,12 @@ export interface Comparison {
 }
 
 /**
- * Parses a Cookie request header into a name to value map. Duplicate names are
- * legal on the wire and the first occurrence is the one servers read, so later
- * duplicates are ignored rather than overwriting.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Parse a Cookie request header into a name to value map.
+ *  Note     |  Duplicate names are legal on the wire and the first is
+ *           |  the one servers read, so later duplicates are ignored
+ *           |  rather than overwriting.
+ * ------------------------------------------------------------------
  */
 export function parseCookieHeader(header: string | undefined | null): Map<string, string> {
   const out = new Map<string, string>();
@@ -91,8 +99,11 @@ export interface DesyncCounts {
 }
 
 /**
- * Keeps a bounded log. Unbounded would grow without limit on a busy profile,
- * and the recent entries are the only ones anyone acts on.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Keep a bounded log of desync events.
+ *  Note     |  Unbounded would grow without limit on a busy profile,
+ *           |  and only the recent entries are ever acted on.
+ * ------------------------------------------------------------------
  */
 export class DesyncLog {
   private readonly events: DesyncEvent[] = [];

@@ -1,15 +1,19 @@
 /**
- * Compositing the tab mark, in the service worker.
- *
- * This runs here rather than in the page for two reasons. The worker holds
- * host permissions, so fetching an icon from a CDN on another origin is not a
- * CORS question; and a data URL drawn into a canvas never taints it, so the
- * result can be read back. A content script has neither property.
- *
- * The cost is the one thing a worker canvas cannot do: createImageBitmap has
- * no SVG decoder outside a document. Sites that ship an SVG alongside a raster
- * icon are handled by preferring the raster one, and sites that ship only an
- * SVG fall back to the generated tile.
+ * ------------------------------------------------------------------
+ *  Title    |  Compositing the tab mark
+ *  Ref      |  badge.ts, Painter, composite, tile
+ *  ID       |  M2 (paint)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Composite a session's tab mark in the service worker.
+ *  How      |  The worker holds host permissions, so fetching an icon
+ *           |  cross-origin is not a CORS question, and a data URL
+ *           |  drawn into a canvas never taints it, so the result reads
+ *           |  back. A content script has neither.
+ *  Note     |  createImageBitmap has no SVG decoder outside a document,
+ *           |  so a raster icon is preferred and an SVG-only site falls
+ *           |  back to the generated tile.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import {
@@ -47,9 +51,13 @@ export interface PaintOutput {
 type Fetcher = (url: string, init: RequestInit) => Promise<Response>;
 
 /**
- * One entry is a base64 png of a 32 pixel icon, so roughly two kilobytes. A
- * browsing session that touches a thousand sites would otherwise hold a couple
- * of megabytes in a worker that is meant to be cheap enough to forget about.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Cap on cached painted marks.
+ *  Note     |  One entry is a base64 png of a 32 pixel icon, roughly
+ *           |  two kilobytes. A session touching a thousand sites would
+ *           |  otherwise hold megabytes in a worker meant to be cheap
+ *           |  enough to forget about.
+ * ------------------------------------------------------------------
  */
 const CACHE_CAP = 300;
 
@@ -71,9 +79,12 @@ export class Painter {
   }
 
   /**
-   * Two tabs on the same site in the same session ask for the same mark at the
-   * same moment. Sharing the in-flight promise means one fetch and one
-   * composite rather than one of each per tab.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Paint a mark, coalescing concurrent requests for it.
+   *  Note     |  Two tabs on the same site in the same session ask for
+   *           |  the same mark at once. Sharing the in-flight promise
+   *           |  means one fetch and one composite, not one per tab.
+   * ------------------------------------------------------------------
    */
   async paint(input: PaintInput): Promise<PaintOutput> {
     const size = input.size ?? ICON_SIZE;
@@ -194,9 +205,13 @@ async function toDataUrl(canvas: OffscreenCanvas): Promise<string> {
 }
 
 /**
- * Draws the source icon to fill the square without distorting it, then stamps
- * the session disc over it. Non-square icons are centred rather than stretched,
- * because a stretched wordmark is less recognisable than a letterboxed one.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Draw the source icon to fill the square without
+ *           |  distorting it, then stamp the session disc over it.
+ *  Note     |  Non-square icons are centred rather than stretched: a
+ *           |  stretched wordmark is less recognisable than a
+ *           |  letterboxed one.
+ * ------------------------------------------------------------------
  */
 async function composite(bitmap: ImageBitmap, size: number, hue: Rgb): Promise<string> {
   const { canvas, ctx } = surface(size);
@@ -214,13 +229,14 @@ async function composite(bitmap: ImageBitmap, size: number, hue: Rgb): Promise<s
 }
 
 /**
- * The generated mark.
- *
- * Text in a worker canvas resolves against system fonts rather than anything
- * the extension ships, and there is no guarantee it renders at all. Rather than
- * assume, the letter is drawn and then looked for; if it did not land, an inner
- * ring takes its place so the tile still reads as deliberate instead of as a
- * blank square.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The generated mark, when no site icon can be decoded.
+ *  How      |  Text in a worker canvas resolves against system fonts
+ *           |  and may not render at all, so the letter is drawn and
+ *           |  then looked for.
+ *  Note     |  If it did not land, an inner ring takes its place so the
+ *           |  tile still reads as deliberate rather than a blank square.
+ * ------------------------------------------------------------------
  */
 async function tile(
   size: number,
@@ -300,9 +316,13 @@ function roundRect(
 }
 
 /**
- * Exposed so the in-browser suite can prove the canvas path works at runtime.
- * Whether the letter landed is measured rather than assumed, because a worker
- * that cannot resolve a font fails silently and produces a plain square.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Exposed so the in-browser suite can prove the canvas
+ *           |  path works at runtime.
+ *  Note     |  Whether the letter landed is measured, not assumed: a
+ *           |  worker that cannot resolve a font fails silently and
+ *           |  produces a plain square.
+ * ------------------------------------------------------------------
  */
 export async function renderTile(
   size: number,

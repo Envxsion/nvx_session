@@ -1,14 +1,20 @@
 /**
- * The tab mark.
- *
- * A session has to be identifiable at sixteen pixels, in a strip beside fifteen
- * other tabs. Tinting the site's own icon would destroy the one thing that
- * makes a tab findable, so the icon is left intact and a session disc is
- * stamped into the lower right corner instead. When no icon can be decoded the
- * disc becomes the whole mark and carries a letter.
- *
- * Everything here is arithmetic over an RGBA buffer with no canvas involved, so
- * the same code runs in the worker, in the panel preview and in a unit test.
+ * ------------------------------------------------------------------
+ *  Title    |  The tab mark
+ *  Ref      |  jar/psl.ts, stampChip, rankIcons, render.ts
+ *  ID       |  M2 (paint)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Draw a session's identifying disc into the corner of a
+ *           |  site's own favicon.
+ *  How      |  A session must be legible at 16px beside many tabs. The
+ *           |  icon is left intact and a session disc is stamped into
+ *           |  the lower right; with no decodable icon the disc becomes
+ *           |  the whole mark and carries a letter.
+ *  Note     |  Pure arithmetic over an RGBA buffer, no canvas, so the
+ *           |  same code runs in the worker, the panel preview and a
+ *           |  unit test.
+ *  Author   |  Ojas Kekre, 17/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { registrableDomain } from '../jar/psl.js';
@@ -69,10 +75,13 @@ export function luminance(c: Rgb): number {
 }
 
 /**
- * The session ramp is deliberately mid-luminance so no session shouts, which
- * puts every hue near the threshold where light and dark ink are both legible.
- * Comparing contrast ratios rather than luminance alone picks the better of the
- * two instead of assuming one.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Pick the ink colour a letter is drawn in.
+ *  Note     |  The session ramp is mid-luminance so no session shouts,
+ *           |  which puts every hue near the threshold where light and
+ *           |  dark ink are both legible. Comparing contrast ratios
+ *           |  rather than luminance alone picks the better of the two.
+ * ------------------------------------------------------------------
  */
 export function inkFor(bg: Rgb): Rgb {
   const l = luminance(bg);
@@ -91,11 +100,13 @@ export interface ChipGeometry {
 }
 
 /**
- * Proportions, not pixels, so the same mark holds at 16, 32 and 64.
- *
- * The disc lands at forty percent of the icon's width. Smaller and it
- * disappears at the size a tab strip actually renders; larger and it starts
- * covering the glyph it is supposed to be annotating.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Disc geometry as proportions, not pixels, so the same
+ *           |  mark holds at 16, 32 and 64.
+ *  Note     |  The disc lands at forty percent of the icon's width.
+ *           |  Smaller and it disappears at the size a tab strip
+ *           |  renders; larger and it covers the glyph it annotates.
+ * ------------------------------------------------------------------
  */
 export function chipGeometry(size: number): ChipGeometry {
   const r = size * 0.2;
@@ -125,9 +136,13 @@ function coverage(x: number, y: number, cx: number, cy: number, r: number): numb
 }
 
 /**
- * Source-over onto a non-premultiplied buffer, which is the format ImageData
- * uses. Compositing as though it were premultiplied leaves a dark fringe
- * wherever the mark meets a transparent pixel, which is the entire rim.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Source-over onto a non-premultiplied buffer, the format
+ *           |  ImageData uses.
+ *  Note     |  Compositing as though it were premultiplied leaves a
+ *           |  dark fringe wherever the mark meets a transparent pixel,
+ *           |  which is the entire rim.
+ * ------------------------------------------------------------------
  */
 function over(px: Uint8ClampedArray, i: number, c: Rgb, alpha: number): void {
   if (alpha <= 0) return;
@@ -142,11 +157,13 @@ function over(px: Uint8ClampedArray, i: number, c: Rgb, alpha: number): void {
 }
 
 /**
- * Stamps the session disc into an RGBA buffer in place.
- *
- * The rim is laid down across the full outer radius and the hue painted over
- * it, rather than drawn as an annulus. An annulus leaves a seam along the join
- * where neither shape reaches full coverage.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Stamp the session disc into an RGBA buffer in place.
+ *  How      |  The rim is laid across the full outer radius and the hue
+ *           |  painted over it, rather than drawn as an annulus.
+ *  Note     |  An annulus leaves a seam along the join where neither
+ *           |  shape reaches full coverage.
+ * ------------------------------------------------------------------
  */
 export function stampChip(
   px: Uint8ClampedArray,
@@ -173,11 +190,13 @@ export function stampChip(
 }
 
 /**
- * One character, never two.
- *
- * Two letters at sixteen pixels is a smudge. Iterating by code point rather
- * than by index keeps an emoji or a non-Latin script intact instead of
- * emitting half a surrogate pair.
+ * ------------------------------------------------------------------
+ *  Purpose  |  One character, never two.
+ *  Note     |  Two letters at sixteen pixels is a smudge. Iterating by
+ *           |  code point rather than index keeps an emoji or a
+ *           |  non-Latin script intact instead of emitting half a
+ *           |  surrogate pair.
+ * ------------------------------------------------------------------
  */
 export function monogram(label: string): string {
   for (const ch of label.trim()) {
@@ -209,20 +228,26 @@ export function tileGeometry(size: number): TileGeometry {
 }
 
 /**
- * Identity of a painted result. Two tabs on the same site in the same session
- * produce the same key, so the icon is composited once and reused.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Identity of a painted result.
+ *  Note     |  Two tabs on the same site in the same session produce
+ *           |  the same key, so the icon is composited once and reused.
+ * ------------------------------------------------------------------
  */
 export function paintKey(source: string, color: string, label: string, size: number): string {
   return `${size}|${color}|${source || `mono:${monogram(label)}`}`;
 }
 
 /**
- * Ranks the icons a page declares.
- *
- * Preference is a decode question, not a taste one. createImageBitmap has no
- * SVG path in a worker, so a site that offers both an SVG and a PNG has to be
- * read from the PNG or the whole composite is lost. Among raster candidates a
- * larger declared size downsamples better than a 16 pixel source upscaled.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rank the icons a page declares.
+ *  Note     |  Preference is a decode question, not a taste one.
+ *           |  createImageBitmap has no SVG path in a worker, so a site
+ *           |  offering both an SVG and a PNG must be read from the PNG
+ *           |  or the composite is lost. Among raster candidates a
+ *           |  larger declared size downsamples better than a 16 pixel
+ *           |  source upscaled.
+ * ------------------------------------------------------------------
  */
 export interface IconCandidate {
   href: string;
