@@ -1,14 +1,18 @@
 /**
- * The two manifest versions, behind one surface.
- *
- * NVX ships MV3 everywhere and MV2 on Opera as an opt-in maximum-isolation
- * mode, and the differences are not cosmetic: MV2 has no chrome.scripting, no
- * chrome.action, no tabGroups, and no dynamic content script registration. It
- * also has a persistent background page, which removes the entire class of
- * lifecycle problems the MV3 build is built around.
- *
- * Everything version-specific lives here so the kernel never asks which
- * manifest it is running under.
+ * ------------------------------------------------------------------
+ *  Title    |  Manifest v2/v3 surface
+ *  Ref      |  manifestVersion, actionApi, injectAgent, fetchInPage
+ *  ID       |  Platform
+ * ------------------------------------------------------------------
+ *  Purpose  |  Hide the two manifest versions behind one surface, so
+ *           |  the kernel never asks which it runs under.
+ *  Note     |  MV3 everywhere, MV2 on Opera as an opt-in maximum
+ *           |  isolation mode. MV2 has no chrome.scripting,
+ *           |  chrome.action, tabGroups, or dynamic script
+ *           |  registration, but its persistent background page
+ *           |  removes the MV3 lifecycle problems.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 export type ManifestVersion = 2 | 3;
@@ -35,12 +39,14 @@ export function actionApi(): ClickableAction | null {
 }
 
 /**
- * The same toolbar button, for the parts of it that are not the click.
- *
- * Separate from `actionApi` only because that one is typed around `onClicked`
- * and a caller wanting the badge should not have to know which of the two names
- * this browser uses either. Both resolve the same object; having two functions
- * that each rediscover it was how a second copy of this appeared in the worker.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The same toolbar button, for the parts that are not
+ *           |  the click.
+ *  Note     |  Separate from actionApi only because that is typed
+ *           |  around onClicked; a badge caller should not have to
+ *           |  know which of the two names this browser uses. Both
+ *           |  resolve the same object.
+ * ------------------------------------------------------------------
  */
 export interface BadgeableAction {
   setBadgeText(details: { text: string }): void;
@@ -58,12 +64,14 @@ export function badgeApi(): BadgeableAction | null {
 }
 
 /**
- * Injects the page agent into a tab that does not already have one.
- *
- * Deliberately two named operations rather than a general "run this code"
- * shim. MV2's tabs.executeScript takes a string, and exposing that as a
- * primitive would put an eval-shaped hole through the extension for the sake
- * of tidiness.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Inject the page agent into a tab that does not already
+ *           |  have one.
+ *  Note     |  A named operation, not a general "run this code" shim:
+ *           |  MV2's tabs.executeScript takes a string, and exposing
+ *           |  that would put an eval-shaped hole through the
+ *           |  extension for the sake of tidiness.
+ * ------------------------------------------------------------------
  */
 export async function injectAgent(tabId: number, file: string): Promise<boolean> {
   try {
@@ -106,17 +114,17 @@ export interface PageFetch {
 }
 
 /**
- * Issues a request from inside a tab, and reports what the page saw.
- *
- * Used only by the guard suite, and only because a refusal has to be observed
- * the way a page observes it: a blocked request rejects rather than returning
- * a status, and asserting on that from the worker would prove nothing.
- *
- * The two manifests need genuinely different mechanics. v3 awaits a promise
- * returned from an injected function; v2's executeScript takes a code string
- * and does not await anything, so the result is parked on the content script's
- * own window and polled for. Both attribute the request to the tab, which is
- * what makes the guard's tab-scoped rules apply to it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Issue a request from inside a tab and report what the
+ *           |  page saw.
+ *  How      |  v3 awaits a promise from an injected function; v2's
+ *           |  executeScript takes a code string and does not await,
+ *           |  so the result is parked on the page and polled for.
+ *           |  Both attribute the request to the tab.
+ *  Note     |  Guard suite only. A refusal has to be observed the way
+ *           |  a page observes it: a blocked request rejects rather
+ *           |  than returning a status.
+ * ------------------------------------------------------------------
  */
 export async function fetchInPage(
   tabId: number,
@@ -172,13 +180,15 @@ export async function fetchInPage(
 }
 
 /**
- * Whether the agent can be scoped to the hosts a session actually cares about.
- *
- * MV3 registers content scripts dynamically, so the agent runs only where a
- * session reaches, which keeps the worker asleep the rest of the time. MV2 has
- * no such API: the agent is declared in the manifest and runs everywhere. That
- * is more exposure, but MV2's background page is persistent anyway, so the
- * keepalive half of the argument disappears with it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether the agent can be scoped to the hosts a session
+ *           |  actually cares about.
+ *  Note     |  MV3 registers content scripts dynamically, so the
+ *           |  agent runs only where a session reaches and the worker
+ *           |  stays asleep otherwise. MV2 has no such API and runs
+ *           |  everywhere, more exposure, but its persistent
+ *           |  background page removes the keepalive half of it.
+ * ------------------------------------------------------------------
  */
 export function canScopeAgent(): boolean {
   return manifestVersion() === 3 && Boolean(chrome.scripting?.registerContentScripts);

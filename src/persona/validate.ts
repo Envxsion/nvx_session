@@ -1,20 +1,19 @@
 /**
- * The consistency validator.
- *
- * Six of your own accounts sharing one device fingerprint is unremarkable, and
- * agencies do it daily. What raises a flag is incoherence: a Linux user agent
- * reporting Windows font metrics, an Apple GPU on a Windows platform, a timezone
- * that disagrees with the language. Randomising makes you weirder, not safer,
- * and a persona that contradicts itself is worse than no persona at all because
- * it is a signal that something is actively lying.
- *
- * So a persona that fails this cannot be saved. Not warned about, not saved with
- * a caveat. The whole value of the feature is that the thing it produces holds
- * together, and a validator you can click past is a validator that is not doing
- * the job.
- *
- * Pure, and deliberately so. Every rule here is a statement about a descriptor,
- * testable without a browser, and the list is meant to be read and argued with.
+ * ------------------------------------------------------------------
+ *  Title    |  Persona consistency validator
+ *  Ref      |  validate, Verdict, Problem
+ *  ID       |  Persona
+ * ------------------------------------------------------------------
+ *  Purpose  |  Refuse a persona that contradicts itself, rather than
+ *           |  one that is merely common.
+ *  How      |  Pure rules over a descriptor, each testable without a
+ *           |  browser. A failure blocks the save, no caveat.
+ *  Note     |  Incoherence is the flag: a Linux UA with Windows
+ *           |  fonts, an Apple GPU on Windows, a clock that disagrees
+ *           |  with the language. Randomising makes you weirder, not
+ *           |  safer.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import type { Os, Persona } from './types.js';
@@ -44,9 +43,13 @@ export interface Verdict {
 }
 
 /**
- * `navigator.deviceMemory` is bucketed by the spec precisely so it cannot carry
- * much entropy. A machine claiming 6 or 12 is claiming a value no browser
- * reports, which identifies the liar rather than the machine.
+ * ------------------------------------------------------------------
+ *  Purpose  |  navigator.deviceMemory is bucketed by the spec so it
+ *           |  carries little entropy.
+ *  Note     |  A machine claiming 6 or 12 reports a value no browser
+ *           |  does, which identifies the liar rather than the
+ *           |  machine.
+ * ------------------------------------------------------------------
  */
 const MEMORY_BUCKETS = [0.25, 0.5, 1, 2, 4, 8];
 
@@ -72,15 +75,17 @@ const GPU_TELLS: Array<{ pattern: RegExp; only: Os; what: string }> = [
 ];
 
 /**
- * Timezones against the languages plausibly spoken where they are.
- *
- * Curated rather than complete, the same trade `psl.ts` makes and for the same
- * reason: the full mapping is a build artefact and this stands in until then.
- * Deliberately permissive. `en` is accepted nearly everywhere because it
- * genuinely is spoken nearly everywhere, so this catches the loud contradiction,
- * a Melbourne timezone claiming Japanese, and lets the arguable cases through.
- * A validator that rejects a real person's real setup teaches them to turn it
- * off.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Timezones against the languages plausibly spoken where
+ *           |  they are.
+ *  How      |  Curated, not complete, like psl.ts: the full mapping is
+ *           |  a build artefact and this stands in until then.
+ *  Note     |  Permissive on purpose. en is accepted almost
+ *           |  everywhere, so this catches the loud contradiction, a
+ *           |  Melbourne clock claiming Japanese, and lets arguable
+ *           |  cases through. Rejecting a real setup teaches the user
+ *           |  to turn it off.
+ * ------------------------------------------------------------------
  */
 const ZONE_LANGUAGES: Record<string, string[]> = {
   'Australia/': ['en'],

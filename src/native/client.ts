@@ -1,13 +1,18 @@
 /**
- * Talking to the native host, when there is one.
- *
- * The host is optional by design: the Store build cannot ship a binary, so
- * every capability it provides has a degraded path and absence is the normal
- * case rather than an error. Nothing here throws when the host is missing.
- *
- * Framing is the browser's problem on this side. chrome.runtime.connectNative
- * handles the length prefixes and hands over parsed objects, which is why the
- * codec lives in native/ and not here.
+ * ------------------------------------------------------------------
+ *  Title    |  Native host bridge
+ *  Ref      |  NativeHost, browserNativeApi, HostStatus
+ *  ID       |  Native messaging
+ * ------------------------------------------------------------------
+ *  Purpose  |  Talk to the native host when there is one; absence is
+ *           |  normal, not an error.
+ *  How      |  connectNative handles the length prefixes and hands
+ *           |  over parsed objects, so no codec lives here.
+ *  Note     |  Store builds ship no binary, so every capability has a
+ *           |  degraded path and nothing here throws when the host is
+ *           |  missing.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 export const HOST_NAME = 'com.nvx.session';
@@ -54,10 +59,13 @@ export function browserNativeApi(): NativePortApi | null {
 }
 
 /**
- * A connection that opens on demand and forgets itself when the host exits.
- *
- * Deliberately not a long-lived singleton: the host idle-exits, and holding a
- * dead port would make every later request hang rather than reconnect.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A connection that opens on demand and forgets itself
+ *           |  when the host exits.
+ *  Note     |  Not a long-lived singleton: the host idle-exits, and a
+ *           |  held dead port would make every later request hang
+ *           |  rather than reconnect.
+ * ------------------------------------------------------------------
  */
 export class NativeHost {
   private port: chrome.runtime.Port | null = null;
