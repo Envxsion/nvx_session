@@ -1,14 +1,18 @@
 /**
- * The entitlement gate, checked from the attacker's side.
- *
- * The security claim is narrow and load-bearing: only a token that verifies
- * under a key we ship, has not expired, and is bound to this device may unlock a
- * feature, and every other input resolves to the free product. So these tests
- * sign real Ed25519 tokens with a throwaway key and then try to get a feature
- * unlocked with a tampered payload, a foreign device, an expired claim, an
- * unknown key, and a forged algorithm, asserting each one stays free. The one
- * positive path (a valid token unlocks exactly its features) is here too, but
- * the weight is on the refusals.
+ * ------------------------------------------------------------------
+ *  Title    |  Entitlement gate, from the attacker's side
+ *  Ref      |  kernel/entitlement.js
+ *  ID       |  test (entitlement)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Only a token that verifies under a shipped key, has not
+ *           |  expired, and is bound to this device may unlock a
+ *           |  feature; every other input resolves to the free product.
+ *  Note     |  Signs real Ed25519 tokens, then tries a tampered
+ *           |  payload, a foreign device, an expired claim, an unknown
+ *           |  key, and a forged algorithm, asserting each stays free.
+ *           |  The weight is on the refusals, not the one positive path.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { webcrypto } from 'node:crypto';

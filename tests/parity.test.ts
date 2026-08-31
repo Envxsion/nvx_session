@@ -1,15 +1,16 @@
 /**
- * The two backends must agree.
- *
- * NVX ships declarative rules on Chrome and a blocking listener on Opera MV2,
- * and they compute the Cookie header by completely different routes: one
- * precompiles a rule per host, path and context, the other answers per request.
- * If they ever disagree, the same account behaves differently depending on
- * which browser it is open in, and only one of them is right.
- *
- * So rather than testing each in isolation, this compiles a session, works out
- * which rule the browser would have matched for a given request, and asserts
- * the blocking backend produces exactly that header.
+ * ------------------------------------------------------------------
+ *  Title    |  The two backends must agree
+ *  Ref      |  netfilter/compile.ts, netfilter/blocking.ts
+ *  ID       |  test (backend parity)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Declarative rules on Chrome and the blocking listener on
+ *           |  Opera MV2 compute the Cookie header by different routes;
+ *           |  they must never disagree, or one account behaves two ways.
+ *  Note     |  Compiles a session, works out the rule the browser would
+ *           |  match, and asserts blocking produces exactly that header.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { describe, expect, it } from 'vitest';

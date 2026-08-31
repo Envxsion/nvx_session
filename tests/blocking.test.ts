@@ -1,3 +1,16 @@
+/**
+ * ------------------------------------------------------------------
+ *  Title    |  Blocking webRequest backend
+ *  Ref      |  netfilter/blocking.js, jar/store.js
+ *  ID       |  test (blocking)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rewrites the Cookie header per request from the session
+ *           |  jar, so the profile jar never reaches a managed tab.
+ *  Note     |  Context rules must match the declarative backend, or the
+ *           |  two disagree about the same request. See parity.test.ts.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
+ */
 import { describe, expect, it, vi } from 'vitest';
 import {
   BlockingNetfilter,

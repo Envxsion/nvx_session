@@ -1,23 +1,17 @@
 /**
- * SameSite and the request method.
- *
- * This is the rule the jar was missing, and it is the one that decides whether
- * a federated sign-in works. RFC 6265bis sends a SameSite=Lax cookie on a
- * cross-site top level navigation only when the method is safe. A SAML
- * assertion comes back from an identity provider as a cross-site POST, so a jar
- * that ignores the method hands that endpoint a session cookie the browser
- * itself would have withheld.
- *
- * Every check here passed trivially before the fix because nothing anywhere
- * told the jar what the method was.
- *
- * Then the rule met a real sign-in and turned out to be half of one. Chrome
- * carves out the first two minutes of a cookie that got Lax by default rather
- * than by request, and sends it on a cross-site top level POST anyway, for
- * exactly this traffic. Enforcing the specification without the carve-out sent
- * the assertion POST with no cookies at all and Moodle answered invalidsesskey.
- * Both halves are pinned below: the withholding, and the window that makes SSO
- * survive it.
+ * ------------------------------------------------------------------
+ *  Title    |  SameSite and the request method
+ *  Ref      |  jar/emit.ts, observer/capture.ts
+ *  ID       |  test (SameSite)
+ * ------------------------------------------------------------------
+ *  Purpose  |  A SameSite=Lax cookie rides a cross-site top-level
+ *           |  navigation only when the method is safe, so a SAML POST
+ *           |  is withheld; ignoring the method leaks a session cookie.
+ *  Note     |  Chrome's two-minute Lax-by-default carve-out sends it on
+ *           |  such a POST anyway, which SSO needs. Both the withholding
+ *           |  and the window that saves it are pinned below.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { describe, expect, it } from 'vitest';

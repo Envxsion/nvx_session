@@ -1,31 +1,18 @@
 /**
- * The fingerprint suite.
- *
- * Section 21 sets the bar and it is not a public testbed: those are a smoke
- * test, never the definition of passing. The definition is a snapshot asserting
- * the fingerprint is identical across reload, restart and window, plus every
- * coherence property the mask claims. All of that is measurable against the
- * fixture, offline and deterministically, which is what makes it a suite rather
- * than an afternoon of clicking.
- *
- * What is actually being proved, in the order it matters.
- *
- * The mask reaches the worker. A content script does not run in a worker scope,
- * so a fingerprinter that builds its hash inside a Worker with an OffscreenCanvas
- * reads pristine values. A page whose worker and main thread disagree about the
- * same drawing is in a state no real machine produces, and section 11 ranks it
- * Critical, above every other vector. It is also the most common failure in
- * extension based spoofing, which is why it is the first check here.
- *
- * The value never moves. Per call randomisation is trivially detected: read the
- * canvas twice and diff. So a read repeated in one page, and the same page
- * loaded again, must agree exactly.
- *
- * The two read paths agree. A site can read a canvas directly, or encode it and
- * decode it back. On a real machine those match, and they have to keep matching.
- *
- * And it fails closed. When the mask cannot reach a worker, it takes itself back
- * off rather than leaving the page holding two fingerprints that disagree.
+ * ------------------------------------------------------------------
+ *  Title    |  Fingerprint mask suite
+ *  Ref      |  persona/compile.ts, persona/useragent.ts, mask worker
+ *  ID       |  test (fingerprint mask)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Snapshot proving the fingerprint is identical across
+ *           |  reload, restart and window, plus every coherence
+ *           |  property the mask claims.
+ *  Note     |  Section 21 smoke tests are a floor, not the definition
+ *           |  of passing. Checks, in order: the mask reaches the
+ *           |  worker, the value never moves, the two read paths
+ *           |  agree, and it fails closed.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { readBodyText } from '../platform.js';
@@ -113,18 +100,14 @@ interface Report {
 }
 
 /**
- * The tab the suite measures in, held in a box rather than passed by value.
- *
- * It can go away underneath the run. Sessions created by earlier phases own the
- * fixture domain, a tab that navigates there can be bound to one, and retiring a
- * session takes its tabs with it. When that happened the next `tabs.update`
- * threw, the whole suite reported one failure, and forty four checks that had
- * already passed were discarded with it.
- *
- * So a lost tab is replaced and said to have been replaced, rather than ending
- * the run. It is a fault in the harness rather than in the product: nothing here
- * is measuring tab lifetime, and losing the evidence is a worse outcome than
- * noting that the surface had to be stood up again.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The tab the suite measures in, boxed so a lost tab can
+ *           |  be replaced mid run rather than ending the whole run.
+ *  Note     |  Retiring a session takes its tabs with it, so the next
+ *           |  tabs.update threw and discarded forty four passed
+ *           |  checks. That is a harness fault, not a product one, so
+ *           |  the surface is stood up again and said to have been.
+ * ------------------------------------------------------------------
  */
 interface Surface {
   id: number;

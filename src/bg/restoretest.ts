@@ -1,11 +1,16 @@
 /**
- * Restart and crash recovery, exercised against real chrome.storage.
- *
- * Unit tests can prove the serialiser round-trips. They cannot prove that a
- * worker which died mid-session comes back with the same sessions, that stale
- * rules from the previous worker are cleared, or that a truncated write is
- * survivable. Those only show up against the real storage area and the real
- * rule engine, so they run here.
+ * ------------------------------------------------------------------
+ *  Title    |  Restart and crash recovery
+ *  Ref      |  kernel/persist.ts, kernel/registry.ts, chrome.storage
+ *  ID       |  test (restore)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Unit tests prove the serialiser round-trips. This proves,
+ *           |  against real storage and the real rule engine, that a
+ *           |  worker which died mid-session comes back with the same
+ *           |  sessions, stale rules from the old worker are cleared, and
+ *           |  a truncated write is survivable.
+ *  Author   |  Ojas Kekre, 17/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { parseSetCookie } from '../jar/cookie.js';

@@ -1,13 +1,18 @@
 /**
- * Telemetry, checked for the one property that matters: it cannot leak.
- *
- * The product's whole promise is that your data does not leave, so the bar for
- * this module is not "does it send counts" but "can it ever send anything it
- * should not". The tests are written from that side. They feed the one text
- * path an adversarial string full of the exact things that must never go out, a
- * URL, a domain, a cookie value, and assert none of it survives into a payload.
- * They confirm both switches, consent and a configured endpoint, gate every
- * send. And they confirm turning it off erases the only durable thing it kept.
+ * ------------------------------------------------------------------
+ *  Title    |  Telemetry cannot leak
+ *  Ref      |  kernel/telemetry.ts
+ *  ID       |  test (telemetry)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Proves the one property that matters: it can never send
+ *           |  anything it should not.
+ *  Note     |  Feeds the text path an adversarial string (a URL, a
+ *           |  domain, a cookie value) and asserts none survives into a
+ *           |  payload. Both consent and a configured endpoint gate
+ *           |  every send, and turning it off erases the one durable
+ *           |  thing it kept.
+ *  Author   |  Ojas Kekre, 24/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { describe, expect, it } from 'vitest';

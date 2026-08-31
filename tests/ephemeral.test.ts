@@ -1,10 +1,16 @@
 /**
- * The session scoped mirror.
- *
- * These cover the encoding and the write discipline. What they cannot cover is
- * the thing that was actually broken, which is that the worker dies: that is
- * asserted against a real browser in `e2e.mjs`, where the worker is killed over
- * the debugger between the close and the reopen.
+ * ------------------------------------------------------------------
+ *  Title    |  The session-scoped mirror
+ *  Ref      |  kernel/ephemeral.js
+ *  ID       |  test (ephemeral)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Covers the encoding and the write discipline of the
+ *           |  ephemeral mirror.
+ *  Note     |  What they cannot cover, the worker dying, is asserted
+ *           |  against a real browser in `e2e.mjs`, where the worker is
+ *           |  killed over the debugger between close and reopen.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 import { describe, expect, it, vi } from 'vitest';
 import {

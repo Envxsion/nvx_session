@@ -1,3 +1,15 @@
+/**
+ * ------------------------------------------------------------------
+ *  Title    |  Badge geometry and colour
+ *  Ref      |  paint/badge.ts, paint/groups.ts
+ *  ID       |  test (paint badge)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The pure arithmetic of the mark: hues, monogram, ink
+ *           |  contrast, tile and chip geometry, and group planning.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
+ */
+
 import { describe, expect, it } from 'vitest';
 import {
   chipGeometry,

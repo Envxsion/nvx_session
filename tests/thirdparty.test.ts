@@ -1,10 +1,16 @@
 /**
- * Third parties: the ledger, and the rule that acts on it.
- *
- * Measured on a real Moodle page under two isolated sessions: 23 requests to
- * doubleclick.net, 6 to Baidu analytics, 4 to LinkedIn, every one carrying the
- * profile's own identifier, identical across both sessions. The accounts were
- * perfectly separated and the person behind them was not.
+ * ------------------------------------------------------------------
+ *  Title    |  The third-party ledger and its rule
+ *  Ref      |  observer/thirdparty.ts, netfilter/compile.ts
+ *  ID       |  test (third party)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Records third-party sightings and proves the rule that
+ *           |  acts on the ledger.
+ *  Note     |  On a real Moodle page two isolated sessions still sent
+ *           |  one identifier to doubleclick, Baidu and LinkedIn:
+ *           |  the accounts were separated, the person was not.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { describe, expect, it } from 'vitest';

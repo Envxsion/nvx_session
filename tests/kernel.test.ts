@@ -1,3 +1,16 @@
+/**
+ * ------------------------------------------------------------------
+ *  Title    |  Kernel registry, persistence and backend
+ *  Ref      |  kernel/registry.ts, kernel/persist.ts, netfilter/dnr.ts
+ *  ID       |  test (kernel)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Registry bindings and resolution, service-worker
+ *           |  ownership, Set-Cookie capture and desync, the DnrBackend,
+ *           |  and the audit regressions behind them.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
+ */
+
 import { describe, expect, it, vi } from 'vitest';
 import { CookieStore } from '../src/jar/store.js';
 import { Registry, domainOf, type Session } from '../src/kernel/registry.js';

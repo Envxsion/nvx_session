@@ -1,10 +1,15 @@
 /**
- * Blast-radius guardrails.
- *
- * The interesting failures here are the ones where the guard is too eager. A
- * warning that fires on an ordinary DELETE is a warning that gets switched off,
- * and a switched-off guard protects nothing, so "does not fire" is tested at
- * least as carefully as "does".
+ * ------------------------------------------------------------------
+ *  Title    |  Blast-radius guardrails
+ *  Ref      |  guard/catalog.ts, guard/policy.ts, guard/audit.ts
+ *  ID       |  test (guard)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The guard warns on real blast radius and stays quiet
+ *           |  on an ordinary request.
+ *  Note     |  A guard that is too eager gets switched off, so "does
+ *           |  not fire" is tested as carefully as "does".
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { describe, expect, it } from 'vitest';

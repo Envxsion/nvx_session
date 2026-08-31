@@ -1,13 +1,17 @@
 /**
- * The isolation proof, runnable from inside the browser.
- *
- * This is the same set of checks tools/e2e.mjs drives over CDP, moved into the
- * extension so it can run anywhere the extension can be loaded. Chrome 151
- * cannot be side-loaded by any automated route, so on Chrome this is the only
- * way to measure rather than assume.
- *
- * It creates throwaway sessions and tabs, proves them, and cleans up after
- * itself whether it passes or throws.
+ * ------------------------------------------------------------------
+ *  Title    |  Isolation proof, in-browser
+ *  Ref      |  kernel/registry.ts, netfilter, observer/desync.ts
+ *  ID       |  test (selftest)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The same checks tools/e2e.mjs drives over CDP, moved into
+ *           |  the extension so it runs anywhere the extension loads.
+ *           |  Chrome 151 cannot be side-loaded, so on Chrome this is the
+ *           |  only way to measure rather than assume.
+ *  Note     |  Creates throwaway sessions and tabs, proves them, and
+ *           |  cleans up whether it passes or throws.
+ *  Author   |  Ojas Kekre, 17/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { parseSetCookie } from '../jar/cookie.js';

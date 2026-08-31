@@ -1,3 +1,14 @@
+/**
+ * ------------------------------------------------------------------
+ *  Title    |  Cookie jar
+ *  Ref      |  jar/cookie.ts, jar/psl.ts, jar/store.ts, jar/emit.ts
+ *  ID       |  test (cookie jar)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Parsing Set-Cookie, domain and path matching, the
+ *           |  per-domain capped store, and the Cookie header emit.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
+ */
 import { describe, expect, it } from 'vitest';
 import {
   defaultPath,

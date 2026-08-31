@@ -1,3 +1,15 @@
+/**
+ * ------------------------------------------------------------------
+ *  Title    |  Identity extraction
+ *  Ref      |  kernel/identity.ts
+ *  ID       |  test (identity)
+ * ------------------------------------------------------------------
+ *  Purpose  |  readJwt decodes a token, identityFrom reads the
+ *           |  signed-in user from a jar, and soonestExpiry says when
+ *           |  that identity lapses.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
+ */
 import { describe, expect, it } from 'vitest';
 import { identityFrom, readJwt, soonestExpiry } from '../src/kernel/identity.js';
 import { parseSetCookie, type Cookie } from '../src/jar/cookie.js';

@@ -1,3 +1,17 @@
+/**
+ * ------------------------------------------------------------------
+ *  Title    |  Engine flush loop and isolation
+ *  Ref      |  kernel/engine.js, kernel/registry.js, netfilter/dnr.js
+ *  ID       |  test (engine)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The debounced flush coalesces bursts, withdraws rules
+ *           |  for deleted sessions, reports overflow, and resolves
+ *           |  strict mode per flush.
+ *  Note     |  The isolation invariant: no rule ever covers tabs from
+ *           |  two sessions, and two sessions on one domain stay apart.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
+ */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CookieStore } from '../src/jar/store.js';
 import { parseSetCookie } from '../src/jar/cookie.js';

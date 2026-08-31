@@ -1,8 +1,15 @@
 /**
- * The native host is optional, so the paths that matter most are the ones where
- * it is not there. A client that throws, hangs, or reports a stale answer when
- * the host is absent would make the Store build worse than having no host
- * support at all.
+ * ------------------------------------------------------------------
+ *  Title    |  Native host client
+ *  Ref      |  native/client.ts
+ *  ID       |  test (native client)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The native host is optional, so the paths that matter
+ *           |  are the ones where it is absent. A client that throws,
+ *           |  hangs, or reports a stale answer must not make the
+ *           |  Store worse than having no host at all.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { describe, expect, it, vi } from 'vitest';

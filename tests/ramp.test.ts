@@ -1,21 +1,18 @@
 /**
- * The identity ramp lives in six files.
- *
- * It has to. The worker picks a colour, the badge painter turns it into pixels
- * on a favicon, the content script draws the chooser inside a page that cannot
- * see the extension's stylesheet, the tab group mapper turns it into one of the
- * browser's nine fixed group colours, the panel draws the swatch you pick from,
- * and the stylesheet is where the values actually come from. None of those can
- * import from another: three run in different worlds and one is CSS.
- *
- * So the guarantee is made here instead. Adding a colour to the ramp and
- * forgetting one of the five other places is a silent failure in every case: a
- * session comes out grey in one surface and correct in the rest, or worse, the
- * worker hands out a name the panel has no swatch for and the user cannot see
- * what colour their own session is.
- *
- * These read the files as text rather than importing them, because two of the
- * six are not modules this test could load.
+ * ------------------------------------------------------------------
+ *  Title    |  Identity ramp parity across six surfaces
+ *  Ref      |  paint/badge.ts, paint/groups.ts, bg/index.ts, extension/*
+ *  ID       |  test (identity ramp)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The ramp's colours and their order must match across
+ *           |  all six surfaces, none of which can import another.
+ *  Note     |  Forgetting one place is a silent failure: a session
+ *           |  comes out grey in one surface, or the worker hands out
+ *           |  a name the panel has no swatch for. Two of the six are
+ *           |  read as text, not imported, since they are not loadable
+ *           |  modules.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { describe, expect, it } from 'vitest';

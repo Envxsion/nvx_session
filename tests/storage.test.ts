@@ -1,11 +1,16 @@
 /**
- * Storage virtualisation.
- *
- * Two halves. The key maths in src/store/keys.ts is what the kernel and the
- * tests reason about; the shim in src/content/shim.ts is what actually runs,
- * and it carries its own copy because a content script cannot import. So the
- * shim is exercised here for real, against a fake origin store, rather than
- * being trusted to agree with a module it cannot use.
+ * ------------------------------------------------------------------
+ *  Title    |  Storage virtualisation
+ *  Ref      |  store/keys.ts, content/shim.ts
+ *  ID       |  test (storage)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Proves the key maths, and exercises the real shim for
+ *           |  real against a fake origin store.
+ *  Note     |  The shim carries its own copy of the maths since a
+ *           |  content script cannot import, so it is run rather than
+ *           |  trusted to agree with a module it cannot use.
+ *  Author   |  Ojas Kekre, 24/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { readFileSync } from 'node:fs';
@@ -137,10 +142,12 @@ interface Harness {
 }
 
 /**
- * Runs the real shim source against a fake origin.
- *
- * `agent` decides whether an ISOLATED-world agent is present, which is the
- * signal the shim uses to tell a managed tab from an unmanaged one.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Runs the real shim source against a fake origin.
+ *  Note     |  `agent` decides whether an ISOLATED-world agent is
+ *           |  present, the signal the shim uses to tell a managed tab
+ *           |  from an unmanaged one.
+ * ------------------------------------------------------------------
  */
 async function boot(
   opts: {

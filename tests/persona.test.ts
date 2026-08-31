@@ -1,17 +1,17 @@
 /**
- * The persona compiler, the validator, and the mask's copy of the noise.
- *
- * Everything here is pure. The mask itself needs a browser and is proved by the
- * fingerprint suite; what this file is for is the part that can be wrong without
- * a browser noticing, which is most of it.
- *
- * The last describe block is the important one. The mask runs in the MAIN world
- * of a page, so it is a classic script that cannot import, and section 17 asks
- * for zero dependencies in it besides. That means the noise algorithm exists
- * twice. Two implementations of the same maths is two chances to be right
- * differently, and the failure would be silent and severe: the compiled bundle
- * and the running mask would disagree about what a canvas should look like, and
- * every determinism guarantee downstream would be about nothing.
+ * ------------------------------------------------------------------
+ *  Title    |  Persona compiler, validator, and mask noise
+ *  Ref      |  persona/noise.ts, compile.ts, validate.ts, useragent.ts, headers.ts
+ *  ID       |  test (persona)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Proves the pure persona logic, and that the mask's own
+ *           |  copy of the noise matches the compiled one.
+ *  Note     |  The mask is a classic MAIN-world script that cannot
+ *           |  import, so the noise maths exists twice. The two copies
+ *           |  must agree or every downstream determinism guarantee is
+ *           |  about nothing.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { describe, expect, it } from 'vitest';

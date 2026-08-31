@@ -1,14 +1,18 @@
 /**
- * The storage isolation proof, runnable from inside the browser.
- *
- * Cookies were the visible half of an identity and web storage is the other
- * half, so this is the same shape as the isolation suite: throwaway sessions,
- * real tabs on the fixture origin, and every claim measured in the page rather
- * than reasoned about in the worker.
- *
- * It runs its assertions in the MAIN world on purpose. That is where the shim
- * lives and where a site's own script runs, so a check that passes here is a
- * check about what a site would actually observe.
+ * ------------------------------------------------------------------
+ *  Title    |  Storage isolation proof
+ *  Ref      |  store/keys.ts, the storage shim
+ *  ID       |  test (storage isolation)
+ * ------------------------------------------------------------------
+ *  Purpose  |  In-browser proof that web storage isolates per
+ *           |  session, the same shape as the cookie isolation suite:
+ *           |  throwaway sessions, real tabs, every claim measured in
+ *           |  the page rather than reasoned about in the worker.
+ *  Note     |  Assertions run in the MAIN world, where the shim and a
+ *           |  site's own script live, so a pass is what a site would
+ *           |  actually observe.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { CookieStore } from '../jar/store.js';
@@ -29,20 +33,18 @@ const A = '__nvx_storagetest_a';
 const B = '__nvx_storagetest_b';
 
 /**
- * Reads the real store, past the shim.
- *
- * Measured rather than assumed, and the answer was not what it looked like.
- * `localStorage` is an own accessor on the window object in Blink, not an
- * inherited one, so the shim's `defineProperty` replaces it outright and
- * `Window.prototype` has nothing to recover. What does still reach the real
- * store is a fresh same-origin `about:blank` frame: it inherits the origin and
- * therefore the storage, but no content script runs in it, so its window is
- * unshimmed.
- *
- * That is the honest limit of this whole approach, and the suite exercises it
- * rather than describing it: a page determined to read another session's
- * storage on its own origin can, in three lines. Cookies do not have that
- * property because the jar never enters the browser's store at all.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Reads the real store, past the shim.
+ *  Note     |  localStorage is an own accessor on window in Blink, so
+ *           |  the shim's defineProperty replaces it outright and
+ *           |  Window.prototype has nothing to recover. What still
+ *           |  reaches the real store is a fresh same-origin
+ *           |  about:blank frame: it inherits the origin and storage
+ *           |  but is unshimmed. That is the honest limit, and the
+ *           |  suite exercises it: a page can read another session's
+ *           |  storage on its own origin in three lines. Cookies lack
+ *           |  that property, the jar never enters the browser store.
+ * ------------------------------------------------------------------
  */
 function rawStore(): { keys: Record<string, string>; viaFrame: boolean } {
   const frame = document.createElement('iframe');

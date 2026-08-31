@@ -1,3 +1,15 @@
+/**
+ * ------------------------------------------------------------------
+ *  Title    |  Compiling sessions into DNR rules
+ *  Ref      |  netfilter/compile.js, netfilter/types.js
+ *  ID       |  test (netfilter compile)
+ * ------------------------------------------------------------------
+ *  Purpose  |  compileDomain, compileHost and compileSession emit the
+ *           |  right declarativeNetRequest rules: scoped, budgeted,
+ *           |  deduped, with the strict catch-all and the Lax window.
+ *  Author   |  Ojas Kekre, 24/08/2026
+ * ------------------------------------------------------------------
+ */
 import { describe, expect, it } from 'vitest';
 import { parseSetCookie } from '../src/jar/cookie.js';
 import { isPublicSuffix } from '../src/jar/psl.js';
@@ -310,9 +322,12 @@ describe('compileSession', () => {
   });
 
   /**
-   * The catch-all a strict compile adds: a rule scoped to the session's tabs with
-   * no domain and no url filter, whose action removes the Cookie header. It is
-   * what strips the browser jar from a host the session has no specific rule for.
+   * ------------------------------------------------------------------
+   *  Purpose  |  Recognises the catch-all a strict compile adds.
+   *  Note     |  Scoped to the session's tabs, no domain, no url filter;
+   *           |  its action removes the Cookie header, stripping the
+   *           |  browser jar from any host without a specific rule.
+   * ------------------------------------------------------------------
    */
   const isCatchAll = (r) =>
     Array.isArray(r.condition.tabIds) &&

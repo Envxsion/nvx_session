@@ -1,3 +1,14 @@
+/**
+ * ------------------------------------------------------------------
+ *  Title    |  Native messaging frames
+ *  Ref      |  native/protocol.mjs
+ *  ID       |  test (native protocol)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Length-prefixed frames survive any stdin split, and
+ *           |  oversized or malformed input is rejected.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
+ */
 import { describe, expect, it } from 'vitest';
 // The host is plain Node, deliberately: it must run without the extension's
 // build ever having happened.

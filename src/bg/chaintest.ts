@@ -1,15 +1,18 @@
 /**
- * The redirect-chain proof.
- *
- * This is the regression test for the failure that took a real Monash sign-in
- * and looped it forever: an origin sets a cookie in a 303 and redirects
- * immediately, so a scheme that has to install a rule before the next request
- * sends a stale header and gets bounced back to the start.
- *
- * The fixture's `/chain` is that sign-in reduced to its essentials. It runs
- * twice on purpose. Once with exact rewriting off, where the chain must fail,
- * because a test that only shows the fix passing cannot tell you the fix is
- * doing anything. Once with it on, where the chain must complete in two hops.
+ * ------------------------------------------------------------------
+ *  Title    |  Redirect-chain proof
+ *  Ref      |  netfilter exact rewriting, jar/store, guard/policy
+ *  ID       |  test (redirect chain)
+ * ------------------------------------------------------------------
+ *  Purpose  |  A regression for a Monash sign-in that looped forever: an
+ *           |  origin sets a cookie in a 303 and redirects at once, so a
+ *           |  scheme installing its rule too late sends a stale header
+ *           |  and gets bounced back to the start.
+ *  Note     |  The fixture's /chain runs twice: exact rewriting off (must
+ *           |  fail) then on (must complete in two hops), so a passing run
+ *           |  alone cannot mask a no-op fix.
+ *  Author   |  Ojas Kekre, 17/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { CookieStore } from '../jar/store.js';

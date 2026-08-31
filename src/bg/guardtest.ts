@@ -1,14 +1,17 @@
 /**
- * The blast-radius proof, runnable from inside the browser.
- *
- * The claim is that a session marked as production refuses a destructive
- * request and lets everything else through, so both halves are measured from
- * inside a real page: a request the guard should stop, and one it must not.
- *
- * It shoots at the fixture rather than at a real provider's delete endpoint,
- * which is the point of the generic catalog rules: a `/destroy` path on any
- * host is destructive, so the guard can be proved without anyone's project
- * being at risk if the proof goes wrong.
+ * ------------------------------------------------------------------
+ *  Title    |  Blast-radius proof
+ *  Ref      |  guard/guard.ts, guard/policy.ts
+ *  ID       |  test (guard)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Runnable inside the browser: a session marked production
+ *           |  refuses a destructive request and lets everything else
+ *           |  through, so both halves are measured from a real page.
+ *  Note     |  Shoots at the fixture, not a real delete endpoint. A
+ *           |  /destroy path on any host is destructive under the generic
+ *           |  catalog rules, so the guard is proved with nothing at risk.
+ *  Author   |  Ojas Kekre, 17/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { CookieStore } from '../jar/store.js';

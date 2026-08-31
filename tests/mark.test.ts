@@ -1,23 +1,18 @@
 /**
- * The mark, and what happens to it when the extension goes away.
- *
- * Reported from real use: the extension was removed and every managed tab kept
- * its coloured dot, explained by nothing, until each one happened to be
- * reloaded. The cause is that the mark is a `link rel=icon` the agent puts into
- * the page, so it belongs to the document rather than to us, and unloading an
- * extension destroys its isolated world synchronously: the port's disconnect
- * handler never runs, `chrome.runtime` throws rather than answering, and there
- * is no uninstall hook because by then nothing of ours exists.
- *
- * What survives is script that has already executed in the page's own world,
- * which is where the shim runs. It cannot ask whether the extension is
- * installed, having no extension APIs by definition, so it watches the stamp
- * the agent refreshes and acts when that stops moving.
- *
- * Tested here rather than in a browser because neither `Extensions.uninstall`
- * nor `Extensions.setDisabled` actually stops the extension over CDP in Opera
- * GX 134: the heartbeat kept ticking through both, which is how the first
- * version of the browser probe came to be measuring nothing. See STATUS.
+ * ------------------------------------------------------------------
+ *  Title    |  The mark after the extension goes away
+ *  Ref      |  mark shim (link rel=icon watchdog)
+ *  ID       |  test (mark)
+ * ------------------------------------------------------------------
+ *  Purpose  |  A removed extension leaves every managed tab wearing its
+ *           |  dot. The in-page shim, all that survives, watches the
+ *           |  stamp the agent refreshed and clears the mark when it
+ *           |  stops moving.
+ *  Note     |  Tested here, not in a browser: neither CDP uninstall nor
+ *           |  setDisabled actually stops the extension on Opera GX 134,
+ *           |  so the heartbeat kept ticking. See STATUS.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -73,9 +68,12 @@ class El {
 }
 
 /**
- * Selectors are matched by hand against the three shapes the watchdog uses.
- * A real engine here would be a dependency and a fiction: what is being tested
- * is the decision and the repair, not anybody's CSS implementation.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Matches selectors by hand against the three shapes the
+ *           |  watchdog uses.
+ *  Note     |  A real CSS engine would be a dependency and a fiction;
+ *           |  the test is the decision and the repair, not the engine.
+ * ------------------------------------------------------------------
  */
 class Doc extends EventTarget {
   all: El[] = [];

@@ -1,24 +1,18 @@
 /**
- * The extension's own pages, checked structurally.
- *
- * These exist because of two bugs found by looking at a screenshot rather than
- * by any suite, and both were the same shape: a name that had to match
- * something in another file, and did not.
- *
- * The setup screen asked the worker for `scan` when the command is `adoptScan`,
- * so it reported an empty profile on a profile full of accounts. Nothing threw.
- * The reply carried `{ error: 'unknown command' }` and the page rendered it as
- * "nothing found", which is the worst possible failure for a first run screen:
- * confidently wrong, in the direction of "this does not work".
- *
- * And a helper moved between two script files, so a page that loaded only one of
- * them threw `ReferenceError` on its first paint and sat on its loading state
- * forever.
- *
- * Neither is catchable by typecheck: these are classic scripts with no module
- * graph, talking to the worker over a string. So the graph is checked here, by
- * reading the files as text, which is the same arrangement `ramp.test.ts` has
- * and for the same reason.
+ * ------------------------------------------------------------------
+ *  Title    |  Extension pages, checked structurally
+ *  Ref      |  extension/* (pages, scripts), src/bg/index.ts
+ *  ID       |  test (ui)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The classic scripts have no module graph, so cross-file
+ *           |  name references are checked here by reading the files as
+ *           |  text, the same arrangement ramp.test.ts uses.
+ *  Note     |  Born from two screenshot bugs of one shape, a name that
+ *           |  had to match another file and did not: a wrong command
+ *           |  name, and a helper split across two scripts. Neither is
+ *           |  catchable by typecheck.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { describe, expect, it } from 'vitest';

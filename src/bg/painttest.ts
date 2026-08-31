@@ -1,11 +1,17 @@
 /**
- * The mark, exercised against a real worker canvas.
- *
- * Unit tests prove the arithmetic. They cannot prove that OffscreenCanvas is
- * reachable from a service worker in this browser, that a font resolves well
- * enough to draw a letter, or that createImageBitmap decodes what a favicon
- * actually is. Those are the assumptions that break silently, and they only
- * answer honestly inside the browser they are being asked about.
+ * ------------------------------------------------------------------
+ *  Title    |  Mark on a real worker canvas
+ *  Ref      |  paint/badge.ts, paint/render.ts
+ *  ID       |  test (paint)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Unit tests prove the arithmetic. This proves, inside the
+ *           |  browser, that OffscreenCanvas is reachable from a service
+ *           |  worker, a font resolves well enough to draw a letter, and
+ *           |  createImageBitmap decodes what a favicon actually is.
+ *  Note     |  Those assumptions break silently, and answer honestly only
+ *           |  in the browser being asked about.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { hueOf, parseHex, rankIcons, HUES, MAX_ICON_CANDIDATES } from '../paint/badge.js';
@@ -54,20 +60,16 @@ async function pixelsNear(dataUrl: string, hex: string): Promise<number> {
 }
 
 /**
- * Can one of our own rules authenticate a fetch the worker makes?
- *
- * This is the question that decides how dangerous a page-declared icon URL is.
- * The painter fetches icons with host permissions, and declarativeNetRequest
- * rules carrying a session's Cookie header match `tabIds: [-1]`, which is the
- * bucket every non-tab request lands in. If those rules applied to the worker's
- * own fetches, a page could name any URL and have it sent authenticated as
- * somebody else's session.
- *
- * Measured on Opera GX 134 / Chromium 150: they do not. A rule setting a
- * session's cookie for the target domain was live, and the fetch arrived with
- * no Cookie header at all. Icons are still restricted to the declaring site, so
- * this is belt and braces, but it is asserted rather than assumed because it is
- * a browser behaviour nobody promised us and a future change would be silent.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Can one of our own DNR rules authenticate a fetch the
+ *           |  worker makes? This decides how dangerous a page-declared
+ *           |  icon URL is: painter fetches carry host permissions and
+ *           |  cookie rules match tabIds [-1], the bucket every non-tab
+ *           |  request lands in.
+ *  Note     |  Measured on Opera GX 134 / Chromium 150: they do not, the
+ *           |  fetch arrived with no Cookie header. Asserted, not assumed,
+ *           |  because a future change would be silent.
+ * ------------------------------------------------------------------
  */
 async function dnrCannotReachOurOwnFetch(
   probeUrl: string
@@ -85,12 +87,14 @@ async function dnrCannotReachOurOwnFetch(
 }
 
 /**
- * Puts a live cookie-setting rule on the fixture domain and tears it down again.
- *
- * Without this the forgery check asserts nothing: it would fetch a domain no
- * session owns, find no Cookie header, and pass for the wrong reason. The rule
- * has to exist and have to have matched for the absence of a header to mean
- * anything.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Puts a live cookie-setting rule on the fixture domain and
+ *           |  tears it down again.
+ *  Note     |  Without this the forgery check asserts nothing: it would
+ *           |  fetch a domain no session owns, find no Cookie header, and
+ *           |  pass for the wrong reason. The rule must have matched for
+ *           |  the absence of a header to mean anything.
+ * ------------------------------------------------------------------
  */
 export interface PaintTestArm {
   (fixture: string): Promise<{ armed: boolean; disarm: () => Promise<void> }>;
