@@ -1,14 +1,16 @@
 /**
- * Service worker entry. Wires browser events to the kernel.
- *
- * Two ordering constraints shape everything here.
- *
- * A tab must be bound and its rules live before it issues its first request,
- * or that request carries the profile jar. So tab creation and navigation
- * flush immediately rather than through the debounce.
- *
- * And the worker itself is terminated when idle, so every handler assumes it
- * may be the first thing to run after a cold start and awaits readiness.
+ * ------------------------------------------------------------------
+ *  Title    |  Service worker entry
+ *  Ref      |  kernel/engine.ts, netfilter, persona, guard, jar
+ *  ID       |  M0 (service worker)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Wire browser events to the kernel.
+ *  How      |  A tab is bound and its rules live before its first
+ *           |  request, so tab creation and navigation flush at once, not
+ *           |  through the debounce. The worker is killed when idle, so
+ *           |  every handler awaits readiness on a possible cold start.
+ *  Author   |  Ojas Kekre, 25/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { Engine } from '../kernel/engine.js';
@@ -91,10 +93,12 @@ const storage: import('../kernel/persist.js').StorageArea = {
 };
 
 /**
- * The area whose lifetime is the browser session rather than the profile.
- *
- * Absent on manifest v2, where the background page is persistent and its heap
- * already has the lifetime this is reaching for.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The storage area scoped to the browser session, not the
+ *           |  profile.
+ *  Note     |  Absent on MV2, where the persistent background page
+ *           |  already has that lifetime.
+ * ------------------------------------------------------------------
  */
 const sessionArea: EphemeralArea | null = (() => {
   const area = (chrome.storage as { session?: chrome.storage.StorageArea }).session;
@@ -116,14 +120,13 @@ const desync = new DesyncLog();
 const painter = new Painter();
 
 /**
- * Anonymous usage counts, off unless the user asked for them and the build was
- * given an endpoint to send to.
- *
- * The endpoint is read from a manifest field the store build injects at package
- * time, so an unpacked developer build has none and sends nothing. No
- * credential is involved on this side by construction: the field is a public
- * ingest URL and the real secrets live on the server behind it. See
- * `src/kernel/telemetry.ts` and TELEMETRY.md.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Anonymous usage counts, off unless consented and given an
+ *           |  endpoint.
+ *  Note     |  The endpoint is a public ingest URL from a manifest field
+ *           |  the store build injects; an unpacked build has none. No
+ *           |  credential here. See telemetry.ts, TELEMETRY.md.
+ * ------------------------------------------------------------------
  */
 const telemetry = new Telemetry(
   {
@@ -157,19 +160,14 @@ const telemetry = new Telemetry(
 );
 
 /**
- * The Pro tier gate and its licence, section 30.
- *
- * Two modules, the same shape as telemetry: a pure part that holds only public
- * material and a wired part that reaches the network. `entitlement` verifies a
- * signed token offline and answers every "is this feature allowed" question;
- * `license` is the only thing that talks to the licence server, to activate a
- * device, refresh, or move a seat. Both fail open to the free product, which
- * never depends on either returning true.
- *
- * The build tier, the licence endpoint and the Ed25519 public keys all come from
- * manifest fields the build stamps in (see tools/build.mjs). A `free` build
- * carries none of it and entitlement is inert, which is what keeps the free
- * listing honest even though one package carries both tiers' code.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The Pro tier gate and its licence, section 30.
+ *  How      |  Like telemetry, a pure part holding only public material
+ *           |  and a wired part that reaches the network. Both fail open
+ *           |  to the free product.
+ *  Note     |  Tier, endpoint and keys come from manifest fields the
+ *           |  build stamps. A free build carries none and is inert.
+ * ------------------------------------------------------------------
  */
 function buildTier(): 'free' | 'pro' {
   return (chrome.runtime.getManifest() as { nvx_tier?: unknown }).nvx_tier === 'pro' ? 'pro' : 'free';
@@ -264,14 +262,14 @@ license = new License({
 });
 
 /**
- * Cross-device sync of the session structure, the Pro `sync` feature.
- *
- * End to end encrypted and zero-knowledge (see src/kernel/sync.ts): the server
- * stores an opaque blob keyed by the licence, and only a device that knows the
- * passphrase can read it. What syncs is the shape of the sessions, never the
- * cookie jars, which stay on the device that earned them. The endpoint sits under
- * the licence API because the licence is the cross-device identity sync
- * authenticates as.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Cross-device sync of the session structure, the Pro sync
+ *           |  feature.
+ *  How      |  Only the shape of the sessions syncs, never the cookie
+ *           |  jars, which stay on the device that earned them.
+ *  Note     |  End to end encrypted, zero-knowledge. See
+ *           |  src/kernel/sync.ts.
+ * ------------------------------------------------------------------
  */
 const sync = new Sync({
   storage,
@@ -299,19 +297,15 @@ const sync = new Sync({
 });
 
 /**
- * Re-applies every Pro feature's effect to match the current entitlement.
- *
- * Called on boot, and again on every entitlement change (activation, expiry,
- * revoke, pause, or a seat moving to another machine), so a feature comes on the
- * moment a licence unlocks it and goes off the moment it stops, with nothing for
- * the user to reload. Each feature degrades to its free behaviour, never to a
- * broken one; that is the contract the whole tier rests on.
- *
- * Today one feature is live, IndexedDB isolation, and its effect is carried in
- * the storage handshake, so re-applying it is re-pushing that handshake to every
- * open managed tab: the shim reads the new gate flag and starts or stops
- * namespacing IndexedDB from the next database it opens. New features add their
- * own line here; the reactive plumbing is already what they hang off.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Re-apply every Pro feature's effect to match the current
+ *           |  entitlement.
+ *  How      |  Called on boot and on every entitlement change, so a
+ *           |  feature comes on or off with nothing to reload. Each
+ *           |  feature degrades to its free behaviour.
+ *  Note     |  Today IndexedDB isolation is the live one, carried in the
+ *           |  storage handshake.
+ * ------------------------------------------------------------------
  */
 function applyEntitlements(): void {
   // IndexedDB isolation: re-push the storage handshake so the shim picks up the
@@ -337,17 +331,15 @@ function applyEntitlements(): void {
 let lastLivePosture: Settings['posture'] = 'mirror';
 
 /**
- * Applies a change in the effective posture: mark existing documents before the
- * rules move, register the scripts and rules for the new posture, and re-answer
- * every tab.
- *
- * Shared by the settings handler and the entitlement re-apply, because a posture
- * reached by changing the setting and one reached by a licence gaining or losing
- * the machine-per-session feature are the same transition and must not drift. The
- * marking is the load-bearing part: a content script cannot enter a document that
- * already exists, so a tab open when the posture leaves Mirror is left real until
- * it reloads, or it would report the real browser while its requests report the
- * masked one, which is the exact incoherence the posture exists to prevent.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Apply a change in the effective posture across every tab.
+ *  How      |  Mark existing documents before the rules move, register
+ *           |  the scripts and rules for the new posture, then re-answer
+ *           |  every tab.
+ *  Note     |  The marking is load-bearing: a script cannot enter a
+ *           |  document that already exists, so a tab open when the
+ *           |  posture leaves Mirror is left real until it reloads.
+ * ------------------------------------------------------------------
  */
 async function applyPostureChange(
   beforeEff: Settings['posture'],
@@ -380,12 +372,14 @@ async function applyPostureChange(
 }
 
 /**
- * The feature gate, the one answer to "is this Pro capability available".
- *
- * On when the licence entitles it, or when this is a dev build, which unlocks
- * every feature without a licence so the features and the in-extension
- * self-tests run locally. Every effective* helper funnels through here, so the
- * dev unlock and the licence answer cannot drift apart between features.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The feature gate, the one answer to "is this Pro
+ *           |  capability available".
+ *  How      |  On when the licence entitles it, or on a dev build, which
+ *           |  unlocks every feature locally so the self-tests run.
+ *  Note     |  Every effective* helper funnels through here so dev and
+ *           |  licence cannot drift.
+ * ------------------------------------------------------------------
  */
 function devUnlock(): boolean {
   return (chrome.runtime.getManifest() as { nvx_tier?: unknown }).nvx_tier === 'dev';
@@ -405,11 +399,12 @@ function effectiveExact(): boolean {
 }
 
 /**
- * The posture actually in effect: the user's choice, unless it is Persona and the
- * machine-per-session feature is not available, in which case it degrades to
- * Mirror. The stored preference is kept rather than overwritten, so Persona comes
- * back on its own the moment a licence unlocks it, with nothing to re-select,
- * which is what makes a licence pause a pause rather than a reset.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The posture actually in effect.
+ *  How      |  The user's choice, unless it is Persona and that feature
+ *           |  is unavailable, when it degrades to Mirror. The preference
+ *           |  is kept, so Persona returns on its own once unlocked.
+ * ------------------------------------------------------------------
  */
 function effectivePosture(p: Settings['posture']): Settings['posture'] {
   return p === 'persona' && !featureOn('os_persona') ? 'mirror' : p;
@@ -422,14 +417,12 @@ function livePosture(): Settings['posture'] {
 const LICENSE_REFRESH_KEY = 'nvx.license.refreshedAt';
 
 /**
- * Refreshes the licence at most once per calendar day.
- *
- * The service worker wakes constantly in MV3, so refreshing on every boot would
- * hammer the endpoint. The token verifies offline in between; the server is only
- * needed to pick up an extension, a revoke, or a seat that moved, none of which
- * is urgent to the minute. So this is throttled on a stored day stamp exactly
- * like the active beat, and is a no-op on a free build or before a key is
- * pasted.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Refresh the licence at most once per calendar day.
+ *  How      |  The worker wakes constantly in MV3, so a stored day stamp
+ *           |  throttles it, like the active beat.
+ *  Note     |  A no-op on a free build or before a key is entered.
+ * ------------------------------------------------------------------
  */
 async function maybeRefreshLicense(): Promise<void> {
   if (!licensePossible() || !license.status().present) return;
@@ -481,9 +474,12 @@ function licenseSnapshot(): {
 }
 
 /**
- * This device's session structure, the subset that syncs. The cookie jars, the
- * families derived from evidence, and the forked-origin bookkeeping are all
- * deliberately left out: they are contents or local state, not structure.
+ * ------------------------------------------------------------------
+ *  Purpose  |  This device's session structure, the subset that syncs.
+ *  Note     |  The cookie jars, the derived families and the
+ *           |  forked-origin bookkeeping are left out: they are contents
+ *           |  or local state, not structure.
+ * ------------------------------------------------------------------
  */
 function syncReadConfig(): SyncConfig {
   const sessions: SyncSession[] = registry
@@ -506,11 +502,14 @@ function syncReadConfig(): SyncConfig {
 }
 
 /**
- * Applies a merged structure to the registry: create sessions that are new here
- * with an empty jar, update the metadata of ones that already exist, and never
- * touch a jar. A session that arrives from another device is a shell to sign into
- * on this one, which is exactly the DBSC-aligned model. Returns how many sessions
- * it created or changed, and schedules the follow-ups that make the change live.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Apply a merged structure to the registry.
+ *  How      |  Create sessions new here with an empty jar, update the
+ *           |  metadata of existing ones, never touch a jar. Returns how
+ *           |  many it created or changed.
+ *  Note     |  A session from another device is a shell to sign into
+ *           |  here, the DBSC-aligned model.
+ * ------------------------------------------------------------------
  */
 function syncApplyConfig(merged: SyncConfig): number {
   let changed = 0;
@@ -584,14 +583,14 @@ async function maybeSync(): Promise<void> {
 }
 
 /**
- * The coarse device profile telemetry attaches to its lifecycle events.
- *
- * Read from the platform APIs and the user agent, then mapped onto the closed
- * sets the telemetry module will clean it against anyway. Everything here is
- * deliberately low resolution: the OS family not the build, the browser major
- * not the full version, the language without its region, the timezone as a
- * whole-hour offset. None of it is a fingerprinting surface, which is the line
- * this product does not cross even in its own analytics.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The coarse device profile telemetry attaches to its
+ *           |  lifecycle events.
+ *  How      |  Read from platform APIs and the user agent, mapped onto
+ *           |  closed sets. Low resolution throughout: OS family not
+ *           |  build, browser major not full version.
+ *  Note     |  None of it is a fingerprinting surface.
+ * ------------------------------------------------------------------
  */
 function detectBrowser(ua: string): { browser: string; major: number } {
   const pick = (re: RegExp): number => {
@@ -647,13 +646,13 @@ function ensureEnv(): Promise<void> {
 const INSTALLED_AT_KEY = 'nvx.telemetry.installedAt';
 const LAST_ACTIVE_KEY = 'nvx.telemetry.lastActive';
 /**
- * Whether the install (or update) event has actually been sent once.
- *
- * Consent is off by default, so the install signal that fires the instant the
- * extension is installed is dropped before the user has any chance to opt in,
- * and nothing retries it. So no install can ever be recorded, which is why the
- * table shows updates but zero installs. This marker lets the first opt-in send
- * the install it could not send earlier, exactly once.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether the install or update event has actually been sent
+ *           |  once.
+ *  How      |  Consent is off by default, so the install signal is
+ *           |  dropped before opt-in and nothing retries it. This marker
+ *           |  lets the first opt-in send the install it missed, once.
+ * ------------------------------------------------------------------
  */
 const INSTALL_REPORTED_KEY = 'nvx.telemetry.installReported';
 /** The high-water engagement reading accumulated since the last beat. */
@@ -662,15 +661,15 @@ const USAGE_PEAK_KEY = 'nvx.telemetry.peak';
 const ANOMALY_KEY = 'nvx.telemetry.anomaly';
 
 /**
- * Sends an anomaly signal at most once per install per calendar day.
- *
- * The anomaly categories (a rule overflow, a sign-in loop, a foreign cookie)
- * fire in bursts precisely when something is wrong: the logs above show a single
- * broken session raising the same one hundreds of times in a minute. What the
- * operator needs from that is the rate across installs, one bit a day per
- * category ("this install hit rule overflow today"), not the storm. So this
- * dedupes on a stored day stamp and drops the rest. Privacy is unchanged: the
- * category is a closed enum with no host, count or value in it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Send an anomaly signal at most once per install per
+ *           |  calendar day.
+ *  How      |  The anomaly categories fire in bursts when something is
+ *           |  wrong; the operator needs the daily rate per category, not
+ *           |  the storm, so this dedupes on a stored day stamp.
+ *  Note     |  The category is a closed enum with no host, count or
+ *           |  value.
+ * ------------------------------------------------------------------
  */
 const anomalyToday = new Set<string>();
 async function anomaly(category: TelemetryError): Promise<void> {
@@ -701,16 +700,15 @@ function usageNow(): { sessions: number; tabs: number } {
 }
 
 /**
- * Keeps a running high-water mark of engagement across the day.
- *
- * The daily beat samples at the first worker wake of a day, and that is the one
- * moment engagement is not representative: on a browser start the tabs have not
- * reopened yet, and on the very first run no session exists at all, so the
- * instant reading is ~0 and structurally stays there. Accumulating the peak of
- * real use here, from every state change, and letting the beat report that peak
- * instead of the cold instant is what makes the number mean something. Cheap,
- * and a no-op while telemetry is off so a profile that never consents writes
- * nothing.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Keep a running high-water mark of engagement across the
+ *           |  day.
+ *  How      |  The daily beat samples at the first wake of a day, when
+ *           |  engagement is least representative. Accumulating the peak
+ *           |  from every state change lets the beat report something
+ *           |  real.
+ *  Note     |  A no-op while telemetry is off.
+ * ------------------------------------------------------------------
  */
 function recordUsage(): void {
   if (!settings.telemetry) return;
@@ -733,19 +731,16 @@ function recordUsage(): void {
 }
 
 /**
- * Fires the once-a-day active beat, at most once per calendar day.
- *
- * Retention is the one thing a pile of installs cannot show on its own, and it
- * needs a heartbeat that repeats while the extension is used and stops when it
- * is not. The guard is a stored day stamp: the first wake of a new day sends,
- * every later wake that day does nothing. It carries the engagement buckets and
- * the days-since-install cohort, never a date.
- *
- * Serialized behind a single in-flight promise. boot and onStartup both fire on
- * a cold start, and without this every caller reads the day stamp before any of
- * them writes it, so all pass the guard and all send: three beats where there
- * should be one. The check and the assignment below are synchronous, so no two
- * callers can both see null.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Fire the once-a-day active beat, at most once per calendar
+ *           |  day.
+ *  How      |  Retention needs a heartbeat that repeats while used and
+ *           |  stops when not. A stored day stamp gates it; it carries
+ *           |  engagement buckets and the days-since-install cohort,
+ *           |  never a date.
+ *  Note     |  Serialised behind one in-flight promise so boot and
+ *           |  onStartup cannot each send.
+ * ------------------------------------------------------------------
  */
 let activeInFlight: Promise<void> | null = null;
 function maybeActive(): Promise<void> {
@@ -789,14 +784,20 @@ async function activeOnce(): Promise<void> {
 }
 
 /**
- * Optional by design. The Store build cannot ship a binary, so every capability
- * the host provides has a degraded path and absence is the normal case.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The native host, optional by design.
+ *  Note     |  The Store build cannot ship a binary, so every host
+ *           |  capability has a degraded path and absence is normal.
+ * ------------------------------------------------------------------
  */
 const native = new NativeHost();
 /**
- * The blast-radius guard. Its rules live in their own id band below the
- * sessions', so a session with many hosts cannot spend its guardrails on
- * cookies without anyone noticing.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The blast-radius guard.
+ *  Note     |  Its rules live in their own id band below the sessions',
+ *           |  so a session with many hosts cannot spend its guardrails
+ *           |  unnoticed.
+ * ------------------------------------------------------------------
  */
 const guard = new Guard(
   backend,
@@ -825,38 +826,29 @@ const guard = new Guard(
     })
 );
 /**
- * Tabs whose document is older than the mask, and which are therefore left
- * entirely real until they load again.
- *
- * A content script only enters a document as it loads, so switching the posture
- * on cannot reach a page that is already sitting there. The header rules can,
- * and covering a document the mask never entered is worse than covering
- * nothing: the page reports the real browser to itself and a fabricated one to
- * the network, and no ordinary browser is ever incoherent that way, so what was
- * meant to blend in stands out instead. Measured on a profile with fifty tabs
- * open before the switch, the page said `OPR/134` and its own fetch arrived as
- * `Chrome/150`.
- *
- * A tab leaves this set the moment it starts a navigation, because the document
- * that navigation produces does get the mask.
- *
- * Mirrored into `chrome.storage.session` with the other two, and with a sharper
- * edge than either: this set is non-empty exactly between a posture change and
- * those tabs being reloaded, which is exactly when somebody changes a setting
- * and walks away, which is exactly how a worker reaches the thirty seconds of
- * quiet that ends it. Losing it does not cost a question the way the reopen
- * memory does, it silently puts the incoherence back.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Tabs whose document is older than the mask, left entirely
+ *           |  real until they load again.
+ *  How      |  A content script only enters a document as it loads, so
+ *           |  switching the posture on cannot reach a page already
+ *           |  sitting there. Covering only its headers is worse than
+ *           |  nothing: the page reports one browser and its requests
+ *           |  another.
+ *  Note     |  A tab leaves the set the moment it navigates. Mirrored
+ *           |  into chrome.storage.session; losing it silently puts the
+ *           |  incoherence back.
+ * ------------------------------------------------------------------
  */
 const unmaskedTabs = new Set<number>();
 
 /**
- * Origins observed using IndexedDB, which is the one storage this extension
- * does not separate.
- *
- * Browser-session scoped rather than persisted, and that is the honest
- * lifetime: it is an observation of what pages did while this browser was
- * open, not a claim about the site in general. A site that used it yesterday
- * and not today should not be accused today.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Origins observed using IndexedDB, the one storage this
+ *           |  extension does not separate.
+ *  Note     |  Browser-session scoped, not persisted: it is what pages
+ *           |  did while this browser was open, not a claim about the
+ *           |  site in general.
+ * ------------------------------------------------------------------
  */
 const idbSites = new Set<string>();
 
@@ -864,12 +856,12 @@ const idbSites = new Set<string>();
 const lastOverflow = new Map<SessionId, Set<string>>();
 
 /**
- * Coalesces the recompile that a page-set cookie triggers.
- *
- * A chatty page writes document.cookie many times a second, and recompiling a
- * session's rules on each one would be a lot of churn for a header that only has
- * to be right by the next request. So writes are gathered and one flush follows
- * a short quiet, which is still far inside a network round trip.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Coalesce the recompile that a page-set cookie triggers.
+ *  How      |  A chatty page writes document.cookie many times a second;
+ *           |  writes are gathered and one flush follows a short quiet,
+ *           |  still inside a network round trip.
+ * ------------------------------------------------------------------
  */
 let cookieFlushTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleCookieFlush(sessionId: SessionId): void {
@@ -943,12 +935,12 @@ function declarativeEngine(): Engine {
 }
 
 /**
- * Who owns a request, for the blocking backend.
- *
- * A tab id resolves through its binding. A request with no tab is worker
- * traffic, and there the declarative path has to guess in advance while this
- * one can simply look up who owns the origin at the moment it is asked, which
- * is the service worker gap closing.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Who owns a request, for the blocking backend.
+ *  How      |  A tab id resolves through its binding. A request with no
+ *           |  tab is worker traffic, looked up by who owns the origin at
+ *           |  the moment it is asked.
+ * ------------------------------------------------------------------
  */
 function ownerOf(details: { tabId: number; url: string }): Owner {
   const binding = registry.binding(details.tabId);
@@ -961,11 +953,12 @@ function ownerOf(details: { tabId: number; url: string }): Owner {
 }
 
 /**
- * The backend is chosen once, by manifest version.
- *
- * Not by feature detection: measured on both browsers, MV3 accepts a blocking
- * listener and the 'blocking' option and then ignores what it returns, so the
- * API being present proves nothing at all.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The backend is chosen once, by manifest version.
+ *  Note     |  Not by feature detection: on MV3 a blocking listener is
+ *           |  accepted and then ignored, so the API being present proves
+ *           |  nothing.
+ * ------------------------------------------------------------------
  */
 function buildNetfilter(): Netfilter {
   if (!blockingIsReal()) return declarativeEngine();
@@ -999,14 +992,15 @@ function buildNetfilter(): Netfilter {
 let engine: Netfilter = buildNetfilter();
 
 /**
- * Exact per-request rewriting, for the declarative backend only.
- *
- * The blocking backend already reads the jar at request time, so it has nothing
- * to be exact about. The declarative one has to install rules before a request
- * leaves, and a redirect chain does not wait: measured on a real Moodle behind
- * Okta, every hop went out with a stale header and the sign-in looped forever.
- * This is the only mechanism that closes that, and it costs a visible infobar,
- * which is why it is a setting rather than an assumption.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Exact per-request rewriting, for the declarative backend
+ *           |  only.
+ *  How      |  The declarative backend installs rules before a request
+ *           |  leaves, and a redirect chain does not wait; measured on
+ *           |  Moodle behind Okta, every hop went out stale and looped.
+ *  Note     |  Costs a visible infobar, so it is a setting rather than an
+ *           |  assumption.
+ * ------------------------------------------------------------------
  */
 const exactApi = browserDebuggerApi();
 const exact =
@@ -1041,11 +1035,12 @@ function watchedDomains(sessionId: SessionId, url: string): string[] {
 }
 
 /**
- * Brings interception in line with the bindings.
- *
- * Called from the one place every mutation already passes through, so a tab
- * that gains, loses or changes a session is engaged or released without any
- * separate bookkeeping to fall out of step.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Bring interception in line with the bindings.
+ *  How      |  Called from the one place every mutation passes through,
+ *           |  so a tab that gains, loses or changes a session is engaged
+ *           |  or released with no separate bookkeeping.
+ * ------------------------------------------------------------------
  */
 function syncExact(): void {
   if (!exact) return;
@@ -1070,40 +1065,37 @@ function syncExact(): void {
 let ready: Promise<void> | null = null;
 
 /**
- * The chooser.
- *
- * A federated site sends you to its identity provider, the provider recognises
- * whichever session it already has, and you are signed in before you were ever
- * asked. Google solves this with an account picker; this is the same idea, and
- * it is only possible because the jar is ours to withhold.
- *
- * ANON is a real session with a permanently empty jar. An unbound tab heading
- * somewhere ambiguous is bound to it first, so the very first request carries
- * nothing and the site shows its own sign-in rather than an account. Only then
- * is the choice offered.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The chooser.
+ *  How      |  A federated site signs you in before you were asked; this
+ *           |  offers an account picker because the jar is ours to
+ *           |  withhold. ANON is a real session with a permanently empty
+ *           |  jar, bound first so the first request carries nothing.
+ * ------------------------------------------------------------------
  */
 const ANON = ANON_SESSION_ID;
 
 /**
- * Registrable domains a tab has already answered for, so it is asked once.
- *
- * Session scoped rather than worker scoped, for the reason in `ephemeral.ts`:
- * an answer the user gave five minutes ago outlives the worker that heard it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Registrable domains a tab has already answered for, so it
+ *           |  is asked once.
+ *  Note     |  Session scoped, not worker scoped: an answer given five
+ *           |  minutes ago outlives the worker that heard it.
+ * ------------------------------------------------------------------
  */
 const decided = new Map<number, Set<string>>();
 const agents = new Map<number, chrome.runtime.Port>();
 
 /**
- * A question that has been asked but not answered, held against the tab.
- *
- * The chooser is a DOM overlay, so it dies with the document that carries it.
- * On an ordinary site that is fine, because nothing else happens until the user
- * answers. A federated site redirects to its identity provider within a second
- * of the first paint, and the question goes with it.
- *
- * Holding it here lets the same question be re-rendered on each hop until it is
- * answered, and remembers where the chain started so answering can go back
- * there rather than reloading a spent SAMLRequest.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A question that has been asked but not answered, held
+ *           |  against the tab.
+ *  How      |  The chooser is a DOM overlay, so it dies with the
+ *           |  document. A federated site redirects within a second,
+ *           |  taking the question with it.
+ *  Note     |  Holding it here re-renders the same question on each hop
+ *           |  and remembers where the chain started.
+ * ------------------------------------------------------------------
  */
 interface Pending {
   /** Where the question was raised, and where answering returns to. */
@@ -1114,52 +1106,49 @@ interface Pending {
 const pending = new Map<number, Pending>();
 
 /**
- * Tabs whose navigation is being held at the picker, and where they were going.
- *
- * Set before anything is awaited, so the two listeners that can both notice the
- * same navigation cannot each send the tab to the picker.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Tabs whose navigation is being held at the picker, and
+ *           |  where they were going.
+ *  Note     |  Set before anything is awaited, so two listeners noticing
+ *           |  the same navigation cannot each send the tab to the
+ *           |  picker.
+ * ------------------------------------------------------------------
  */
 const held = new Map<number, string>();
 
 /**
- * Which session a closed tab was in, by origin.
- *
- * Closing a tab drops its binding, and a tab reopened from history or with
- * Ctrl+Shift+T is a new tab that knows nothing. Without this it lands unbound,
- * gets asked again, and reads as having been signed out by the extension, which
- * is the single most alarming thing it can appear to do.
- *
- * An hour, because that is the span in which reopening is plainly the same
- * piece of work. Beyond it the tab is a new intention and deserves the question.
- *
- * That hour is only real because this map is mirrored into the browser's
- * session storage. Left in the worker's heap it lasted until the next thirty
- * seconds of quiet, which is not a window anybody would design and was not a
- * window anybody noticed. See `ephemeral.ts`.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Which session a closed tab was in, by origin.
+ *  How      |  A reopened tab knows nothing; without this it lands
+ *           |  unbound, gets asked again, and reads as signed out. An
+ *           |  hour is the span in which reopening is plainly the same
+ *           |  work.
+ *  Note     |  The hour is only real because this map is mirrored into
+ *           |  session storage. See ephemeral.ts.
+ * ------------------------------------------------------------------
  */
 const REOPEN_WINDOW_MS = 60 * 60 * 1000;
 const REOPEN_MEMORY = 60;
 const recentlyClosed = new Map<string, { sessionId: SessionId; at: number }[]>();
 
 /**
- * Mirrors the two maps above into storage that outlives the worker.
- *
- * Read through a closure rather than handed the maps, so it always writes what
- * is live rather than what existed when it was constructed.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Mirror the two maps above into storage that outlives the
+ *           |  worker.
+ *  How      |  Read through a closure rather than handed the maps, so it
+ *           |  always writes what is live.
+ * ------------------------------------------------------------------
  */
 /**
- * What the extension did, kept on disk.
- *
- * Every console line in this file goes through `note` below and lands here as
- * well, and so do the decisions that never had a console line: which session a
- * tab was bound to and why, what an adoption took, what the chooser was
- * answered with. The console is erased by a worker restart, a browser close and
- * a machine reboot, which are the three events that happen between a user
- * noticing something and being asked what happened.
- *
- * Nothing sensitive reaches it. See the rules at the top of `journal.ts`; they
- * are enforced there rather than at the call sites here, because a call site is
- * where they will eventually be forgotten.
+ * ------------------------------------------------------------------
+ *  Purpose  |  What the extension did, kept on disk.
+ *  How      |  Every console line goes through note below and lands here,
+ *           |  and so do decisions that never had a console line. The
+ *           |  console is erased by a restart, a close and a reboot, the
+ *           |  three events between noticing and being asked.
+ *  Note     |  Nothing sensitive reaches it; the rules are enforced in
+ *           |  journal.ts.
+ * ------------------------------------------------------------------
  */
 const journal = new Journal(storage, {
   floor: () => settings.logLevel,
@@ -1167,12 +1156,12 @@ const journal = new Journal(storage, {
 });
 
 /**
- * Says something, once, to both places that need to hear it.
- *
- * The console is for whoever has devtools open right now. The journal is for
- * whoever is reading this an hour later, which is everybody who has ever filed
- * a bug about this product. Writing to one and not the other is how the two
- * drift, and the one that drifts is always the one nobody is watching.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Say something, once, to both places that need to hear it.
+ *  How      |  The console is for whoever has devtools open now; the
+ *           |  journal is for whoever reads it an hour later. Writing to
+ *           |  one and not the other is how the two drift.
+ * ------------------------------------------------------------------
  */
 function note(
   level: Level,
@@ -1205,8 +1194,12 @@ const ephemeral = new Ephemeral(
 let lastOrphans: Orphan[] = [];
 
 /**
- * Third parties seen in each session's tabs, kept per session because that is
- * the unit the setting applies to and the unit the user reads it in.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Third parties seen in each session's tabs, kept per
+ *           |  session.
+ *  Note     |  That is the unit the setting applies to and the unit the
+ *           |  user reads it in.
+ * ------------------------------------------------------------------
  */
 const thirdParties = new Map<SessionId, ThirdPartyLog>();
 
@@ -1220,26 +1213,17 @@ function thirdPartyLog(sessionId: SessionId): ThirdPartyLog {
 }
 
 /**
- * Records a closed tab so reopening it rejoins the session it was in.
- *
- * A queue per origin, not a single entry, and it is consumed rather than
- * remembered. Both of those are corrections to something that read as random
- * behaviour and was not.
- *
- * A single entry meant the memory outlived its purpose completely. Close one
- * tab on a site in Work, and every tab opened on that site for the next hour
- * silently joined Work: not just the reopen, but the deliberate fresh visit
- * afterwards, which is exactly when somebody is trying to sign in as the other
- * account. It never asked, because it thought it already knew. That is the
- * "it assumed I was trying to use the student account" report, and fixing
- * opener inheritance did not fix it, because this is a different path to the
- * same wrong answer.
- *
- * A queue also gets the count right. Ctrl+Shift+T is one restore per closed
- * tab, so three tabs closed in Work earn three reopens into Work and the
- * fourth visit is a question. And because entries are popped most recent
- * first, two sessions closing tabs on one origin unwind in the order they were
- * closed rather than the later one claiming both.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Record a closed tab so reopening it rejoins the session it
+ *           |  was in.
+ *  How      |  A queue per origin, consumed rather than remembered. A
+ *           |  queue gets the count right: three tabs closed in Work earn
+ *           |  three reopens, and the fourth visit is a question.
+ *  Bug-Fix  |  A single entry silently joined every later visit for an
+ *           |  hour, the "it assumed I was the student account" report.
+ *           |  Popping most recent first unwinds two sessions in close
+ *           |  order.
+ * ------------------------------------------------------------------
  */
 const REOPEN_PER_ORIGIN = 8;
 
@@ -1272,23 +1256,23 @@ function rememberClosedTab(tabId: number): void {
 }
 
 /**
- * The session a tab on this url was in until recently, if it still exists.
- *
- * Consumes what it returns. One close earns one reopen, and after that the
- * ordinary rules apply again: a domain two sessions cover is a question, not a
- * guess.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The session a tab on this url was in until recently, if it
+ *           |  still exists.
+ *  How      |  Consumes what it returns. One close earns one reopen;
+ *           |  after that a domain two sessions cover is a question, not
+ *           |  a guess.
+ * ------------------------------------------------------------------
  */
 /**
- * The same answer, without taking it.
- *
- * The picker draws a "last used here" hint beside one option, and drawing a
- * hint must not spend the memory: one close earns one reopen, and a reopen
- * spent on a tooltip is a reopen the next `Ctrl+Shift+T` does not get. Latent
- * until now, because the picker only appears when `rememberedFor` has already
- * come back empty, so the queue is normally empty by the time this is asked.
- * The window is a tab closing on the same origin while the picker is on screen,
- * which is milliseconds wide and entirely real, and mirroring the memory to
- * disk turned a transient wrong answer into a durable one.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The same answer, without taking it.
+ *  How      |  The picker draws a "last used here" hint, and drawing it
+ *           |  must not spend the memory that the next Ctrl+Shift+T
+ *           |  needs.
+ *  Note     |  The window is a tab closing on the same origin while the
+ *           |  picker is on screen, milliseconds wide and real.
+ * ------------------------------------------------------------------
  */
 function peekRemembered(url: string): SessionId | null {
   const origin = originOf(url);
@@ -1336,19 +1320,15 @@ function rememberedFor(url: string): SessionId | null {
 }
 
 /**
- * Which sessions this tab could be, which is not the same question as which
- * sessions already have an account here.
- *
- * Two kinds qualify. A session holding cookies for the domain, which is an
- * identity to resume. And a session pinning the domain, which is the user
- * having already said this session is for this site, whether or not it holds
- * anything yet.
- *
- * Leaving the second kind out makes signing in as a second account impossible.
- * A new session is empty by definition, so it never appears, and the only
- * option offered is the account already signed in. Picking it puts the second
- * tab in the first tab's session and both windows show the same person, which
- * reads as the isolation having failed when in fact it was never asked for.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Which sessions this tab could be, not which already have
+ *           |  an account here.
+ *  How      |  A session holding cookies for the domain is an identity to
+ *           |  resume; a session pinning the domain is the user having
+ *           |  said this session is for this site.
+ *  Note     |  Leaving the second kind out makes signing in as a second
+ *           |  account impossible.
+ * ------------------------------------------------------------------
  */
 function chooserOptionsFor(host: string) {
   const domain = domainOf(`https://${host}/`) || host;
@@ -1477,12 +1457,14 @@ async function maybeOfferChoice(tabId: number, url: string, force = false): Prom
 }
 
 /**
- * Puts an unanswered question back up after a navigation destroyed it.
- *
- * The question is the one raised where the chain started, not a fresh one for
- * wherever it has got to. An identity provider is a stop on the way, not the
- * thing an account is being chosen for, and no session covers it anyway, so
- * recomputing would offer nothing and the tab would sign in parked in ANON.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Put an unanswered question back up after a navigation
+ *           |  destroyed it.
+ *  How      |  The question is the one raised where the chain started,
+ *           |  not a fresh one. An identity provider is a stop on the
+ *           |  way, and no session covers it, so recomputing would offer
+ *           |  nothing.
+ * ------------------------------------------------------------------
  */
 async function reoffer(tabId: number, url: string): Promise<boolean> {
   const held = pending.get(tabId);
@@ -1515,30 +1497,27 @@ function noteInTab(tabId: number, text: string, accent: string, strong?: string)
 }
 
 /**
- * What an unbound tab does when it is about to load something.
- *
- * Four answers, in order of how much the user has already told us.
- *
- * A tab reopened onto an origin one was closed on rejoins that session and is
- * told so. A domain exactly one session pins joins it, which is what makes
- * pinning feel like a container. A domain several sessions cover is held: the
- * navigation is replaced with the picker and the site is not contacted at all.
- * Anything else is left alone, because most of the browser is not ours.
- *
- * Holding rather than asking over the top of the page is the whole change. A
- * federated site redirects to its identity provider within a second, which
- * destroys any in-page prompt, and whatever jar the tab held while it waited is
- * the account the sign-in completes as. Measured: an empty holding pen turned
- * a Moodle sign-in into an endless bounce between service and provider, and a
- * populated one silently signed the second tab in as the first account.
+ * ------------------------------------------------------------------
+ *  Purpose  |  What an unbound tab does when it is about to load
+ *           |  something.
+ *  How      |  Four answers, in order of how much the user has told us: a
+ *           |  reopened tab rejoins, a domain one session pins joins it,
+ *           |  a domain several cover is held at the picker, anything
+ *           |  else is left alone.
+ *  Note     |  Holding rather than asking over the page is the whole
+ *           |  change. Measured: an empty holding pen looped a Moodle
+ *           |  sign-in; a populated one signed the second tab in as the
+ *           |  first.
+ * ------------------------------------------------------------------
  */
 /**
- * One line per binding, which is the question the journal exists to answer.
- *
- * "My tab ended up in the wrong account" is the only bug report this product
- * gets that cannot be reproduced on demand, and the whole of the answer is which
- * of the four rules below claimed the tab. Recorded where the decision is made
- * rather than inferred later from state that has already moved on.
+ * ------------------------------------------------------------------
+ *  Purpose  |  One line per binding, the question the journal exists to
+ *           |  answer.
+ *  Note     |  "My tab ended up in the wrong account" is the one report
+ *           |  that cannot be reproduced on demand; the answer is which
+ *           |  of the four rules claimed the tab.
+ * ------------------------------------------------------------------
  */
 function noteBinding(tabId: number, sessionId: SessionId, why: string, url: string): void {
   note('info', 'tab', 'bound', {
@@ -1550,27 +1529,28 @@ function noteBinding(tabId: number, sessionId: SessionId, why: string, url: stri
 }
 
 /**
- * Sites this extension has been told to leave alone, permanently.
- *
- * The escape hatches before this were a per-tab "not this time" that dies with
- * the browser session, unbinding one tab, and deleting the whole session. None
- * of them is "this site and this extension cannot work together, stop trying",
- * which is the thing somebody actually needs when a sign-in will not complete.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Sites this extension has been told to leave alone,
+ *           |  permanently.
+ *  Note     |  The earlier escape hatches were per-tab, unbinding, or
+ *           |  deleting a session; none was "this site and this extension
+ *           |  cannot work together, stop trying".
+ * ------------------------------------------------------------------
  */
 function isReleased(domain: string): boolean {
   return settings.released.includes(domain);
 }
 
 /**
- * A tab that is in a session before it makes its first request.
- *
- * The safe way to put an account into a session, the whole reason it is its own
- * command: a federated login is broken by being handed part of a cookie set, so
- * the binding and the rules have to be in place before the first request leaves.
- * An empty tab, bound, flushed, its scripts registered, and only then pointed at
- * the site, so the sign-in page loads already wearing this session. The domain
- * is pinned too, so the account sticks and the picker becomes the switcher once
- * a second session also wants it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A tab that is in a session before it makes its first
+ *           |  request.
+ *  How      |  A federated login breaks on a partial cookie set, so the
+ *           |  binding and rules are in place first: an empty tab, bound,
+ *           |  flushed, scripts registered, then pointed at the site.
+ *  Note     |  The domain is pinned too, so the account sticks and the
+ *           |  picker becomes the switcher.
+ * ------------------------------------------------------------------
  */
 async function openInSession(
   sessionId: string,
@@ -1630,45 +1610,45 @@ async function openInSession(
 }
 
 /**
- * Stops managing a site, everywhere, and puts its open tabs back.
- *
- * Unbinding the tabs is the half that matters. Adding the domain to the list
- * only stops the next claim; a tab already in a session keeps its rewritten
- * headers, which on the site that prompted this is exactly the state being
- * escaped from.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Stop managing a site, everywhere, and put its open tabs
+ *           |  back.
+ *  Note     |  Unbinding the tabs is the half that matters; adding the
+ *           |  domain only stops the next claim.
+ * ------------------------------------------------------------------
  */
 /**
- * Reserved rule id for the move guard.
- *
- * Sits in the gap between the posture band (10..25) and the guard band (100+),
- * so it collides with nothing. One id is enough for any number of tabs, because
- * a single declarativeNetRequest rule can name every moving tab at once in
- * `condition.tabIds`.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Reserved rule id for the move guard.
+ *  How      |  Sits in the gap between the posture band (10..25) and the
+ *           |  guard band (100+), so it collides with nothing. One id
+ *           |  covers any number of tabs via condition.tabIds.
+ * ------------------------------------------------------------------
  */
 const MOVE_BLOCK_ID = 30;
 /** Above every compiled priority, so the transient block dominates. */
 const PRIORITY_MOVE_BLOCK = 2000;
 
 /**
- * Serialises moves so two of them cannot interleave.
- *
- * A batch move rebinds several tabs and then recompiles, and two batches
- * running at once could rebind the same tab twice and flush a registry that the
- * other is still editing. Chaining them makes the second wait, which is
- * invisible at human speed and correct.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Serialise moves so two of them cannot interleave.
+ *  How      |  A batch move rebinds several tabs then recompiles; two at
+ *           |  once could rebind a tab twice and flush a registry the
+ *           |  other is editing. Chaining makes the second wait.
+ * ------------------------------------------------------------------
  */
 let moving: Promise<unknown> = Promise.resolve();
 
 /**
- * The last single-tab move made with no surface open to undo it.
- *
- * A move from the popup shows its own toast with an undo the instant it
- * happens. A move from the right-click menu or a keyboard shortcut happens with
- * the popup closed, so there is nowhere to put that undo at the time. This
- * remembers the one most recent such move so the popup can offer to take it back
- * the next time it opens, and only the most recent, because an undo the user has
- * to hunt for a stale target in is not one. Cleared when it is undone, when the
- * tab moves again, or when the tab closes.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The last single-tab move made with no surface open to undo
+ *           |  it.
+ *  How      |  A move from the menu or a shortcut happens with the popup
+ *           |  closed, so this remembers the one most recent such move
+ *           |  for the popup to offer back.
+ *  Note     |  Cleared when undone, when the tab moves again, or when it
+ *           |  closes.
+ * ------------------------------------------------------------------
  */
 interface LastMove {
   tabId: number;
@@ -1678,29 +1658,27 @@ interface LastMove {
   at: number;
 }
 let lastMove: LastMove | null = null;
-/** How long a closed-surface move stays offered for undo. Long enough to open
- *  the popup and notice, short enough that it is never a stale surprise. */
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  How long a closed-surface move stays offered for undo.
+ *  Note     |  Long enough to open the popup and notice, short enough
+ *           |  that it is never a stale surprise.
+ * ------------------------------------------------------------------
+ */
 const LAST_MOVE_TTL_MS = 90_000;
 
 /**
- * Moves many tabs into one session at once, without a window where a tab leaks
- * the wrong account.
- *
- * The problem this solves is not that a single move is unsafe, it is that ten
- * of them done one at a time is ten separate windows in which a request could
- * fire against half-applied rules, and a person moving ten tabs is exactly who
- * clicks the next thing before the last has settled. So the whole batch is one
- * operation with one recompile, wrapped in a block.
- *
- * The block is the "nothing leaks" guarantee, and it is the same shape as the
- * fail-closed rule: a single declarative block naming every moving tab, at a
- * priority that beats the header rewrites, installed before anything is rebound
- * and removed only once the new rules are live. Between those two points every
- * request from a moving tab is stopped rather than sent with whichever account
- * happened to be compiled at that instant. The cost is that those tabs cannot
- * make a request for the few milliseconds the swap takes, which is the correct
- * trade: a request that waits is fine, a request that carries the wrong cookies
- * is the whole failure this product exists to prevent.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Move many tabs into one session at once, with no window
+ *           |  where a tab leaks the wrong account.
+ *  How      |  Ten moves one at a time is ten windows for a half-applied
+ *           |  request, so the whole batch is one operation with one
+ *           |  recompile, wrapped in a block naming every moving tab at a
+ *           |  priority above the header rewrites.
+ *  Note     |  Those tabs cannot request for the few ms the swap takes,
+ *           |  the correct trade: a request that waits is fine, one that
+ *           |  carries the wrong cookies is the whole failure.
+ * ------------------------------------------------------------------
  */
 async function moveTabs(
   tabIds: number[],
@@ -1861,29 +1839,18 @@ async function unreleaseSite(domain: string): Promise<void> {
 }
 
 /**
- * A sign-in that will not finish, caught while it is still recoverable.
- *
- * This exists because of one incident and it is the most valuable thing in the
- * extension by consequence avoided. A federated provider holds several cookies
- * that are meant to agree with each other; a session holding a snapshot of some
- * of them presents a set that reads as stolen rather than as signed out, and
- * the provider's correct answer to a stolen session is to invalidate the
- * account everywhere. The user does not see any of that. What they see is a
- * page that reloads forever, or one that says cookies are disabled, and no
- * reason to connect either to an extension.
- *
- * Two signals, and they are believed differently.
- *
- * `ERR_TOO_MANY_REDIRECTS` is the browser itself giving up on a redirect chain.
- * It is not a heuristic and it is not ambiguous, so one is enough.
- *
- * Counting repeated main frame navigations to one registrable domain is the
- * heuristic half, for the loops that never reach the browser's own limit
- * because each hop lands, sets a cookie and bounces. The threshold has to sit
- * above an ordinary federated sign-in, which is genuinely three to five hops
- * across two or three domains, so it counts hops within a single registrable
- * domain and asks for eight of them inside fifteen seconds. A real sign-in does
- * not do that. A loop does it in under two.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A sign-in that will not finish, caught while it is still
+ *           |  recoverable.
+ *  How      |  Two signals, believed differently. ERR_TOO_MANY_REDIRECTS
+ *           |  is the browser giving up, so one is enough. Counting
+ *           |  main-frame hops to one registrable domain catches loops
+ *           |  that never reach the browser limit: eight in fifteen
+ *           |  seconds, which a real sign-in never does.
+ *  Note     |  A partial cookie set at a federated provider reads as
+ *           |  stolen, and the provider answers by invalidating the
+ *           |  account everywhere.
+ * ------------------------------------------------------------------
  */
 const LOOP_HOPS = 8;
 const LOOP_WINDOW_MS = 15_000;
@@ -1891,17 +1858,15 @@ const LOOP_WINDOW_MS = 15_000;
 const hops = new Map<number, Array<[string, number]>>();
 
 /**
- * One journal line per step of a managed sign-in, because the logs a loop
- * leaves behind name the loop but not the step that broke it.
- *
- * A federated sign-in is a chain of top-level navigations across a handful of
- * hosts, and when it fails it fails at one of them: a host whose rule was
- * dropped past the budget so the request carried the browser jar, or a host the
- * session holds no cookie for so the provider sees a signed-out set. Recording
- * the host, whether its rule survived, and how many cookies the session holds
- * for it turns "it looped" into "it looped because accounts.example.com had no
- * rule on this hop". No cookie values and no query string, so nothing sensitive
- * lands in the journal, only the shape of the step.
+ * ------------------------------------------------------------------
+ *  Purpose  |  One journal line per step of a managed sign-in.
+ *  How      |  A federated sign-in fails at one host: a dropped rule so
+ *           |  the browser jar goes out, or a host with no cookie so the
+ *           |  provider sees a signed-out set. Recording the host,
+ *           |  whether its rule survived, and how many cookies are held
+ *           |  turns "it looped" into why.
+ *  Note     |  No cookie values and no query string.
+ * ------------------------------------------------------------------
  */
 function noteSignInStep(tabId: number, sessionId: SessionId, url: string): void {
   const host = hostOf(url);
@@ -2041,19 +2006,15 @@ async function routeUnboundTab(tabId: number, url: string, windowId?: number): P
 }
 
 /**
- * Puts restored tabs back in the sessions they were in before the browser
- * closed, and asks about the ones that cannot be answered.
- *
- * Every tab comes back from a restart with a new id, so every binding was just
- * dropped by reconcile even though the tabs themselves survived. Matching by
- * url is the only continuity the browser leaves: nothing carries a tab across
- * a restart except where it was pointing.
- *
- * Exact url first, then origin, because a tab that navigated on while the
- * browser was closing still belongs to the session it was in. Where two
- * sessions were both open on the same place the answer is genuinely unknown,
- * and guessing is the one outcome worth avoiding: a wrong guess signs the user
- * in as the other account without asking. Those get held instead.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Put restored tabs back in their sessions, and ask about
+ *           |  the ones that cannot be answered.
+ *  How      |  Every tab returns with a new id, so matching by url is the
+ *           |  only continuity. Exact url first, then origin.
+ *  Note     |  Two sessions open on one place is genuinely unknown;
+ *           |  guessing signs the user in as the other account, so those
+ *           |  are held.
+ * ------------------------------------------------------------------
  */
 async function restoreAfterRestart(): Promise<void> {
   const orphans = lastOrphans;
@@ -2105,11 +2066,12 @@ async function restoreAfterRestart(): Promise<void> {
 }
 
 /**
- * Records that a tab is meant to be unmanaged here, so the picker leaves it be.
- *
- * The same answer the user gives by choosing "just this once", reachable to
- * anything that already knows what it wants. Without it a suite arranging a
- * deliberately unmanaged tab is asked to choose and stops.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Record that a tab is meant to be unmanaged here, so the
+ *           |  picker leaves it be.
+ *  How      |  The same answer as "just this once", reachable to anything
+ *           |  that already knows what it wants.
+ * ------------------------------------------------------------------
  */
 function leaveUnmanaged(tabId: number, url: string): void {
   const domain = domainOf(url);
@@ -2135,9 +2097,12 @@ async function holdForChoice(tabId: number, url: string): Promise<void> {
 }
 
 /**
- * The agent is registered only for hosts a session cares about, so a tab the
- * user wants to re-pick may not have one. Injecting on demand keeps the panel
- * button working everywhere rather than only where a session already reaches.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Inject the agent on demand for a tab that has none.
+ *  How      |  The agent is registered only for hosts a session cares
+ *           |  about, so a re-pick may reach a tab with no agent.
+ *           |  Injecting keeps the panel button working everywhere.
+ * ------------------------------------------------------------------
  */
 async function ensureAgent(tabId: number): Promise<chrome.runtime.Port | null> {
   const existing = agents.get(tabId);
@@ -2154,12 +2119,14 @@ async function ensureAgent(tabId: number): Promise<chrome.runtime.Port | null> {
 // ------------------------------------------------------------------- mark
 
 /**
- * Repaints one tab's mark.
- *
- * The composite is cached by icon, colour and label, so the common case of ten
- * tabs on one site in one session is a single fetch and a single canvas pass.
- * A tab with no binding is told to put the site's own icon back rather than
- * left wearing the last session it was in.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Repaint one tab's mark.
+ *  How      |  The composite is cached by icon, colour and label, so ten
+ *           |  tabs on one site in one session is a single fetch and
+ *           |  canvas pass.
+ *  Note     |  A tab with no binding is told to put the site's own icon
+ *           |  back.
+ * ------------------------------------------------------------------
  */
 async function paintTab(tabId: number): Promise<void> {
   const port = agents.get(tabId);
@@ -2213,9 +2180,13 @@ async function paintTab(tabId: number): Promise<void> {
 const PAINT_PROBE = '__nvx_paint_probe';
 
 /**
- * Stands up a real session that owns the fixture domain's worker traffic, so
- * the forgery check has a live cookie-setting rule to be defeated by. Without
- * it the check fetches a domain nothing owns and passes for the wrong reason.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Stand up a real session that owns the fixture domain's
+ *           |  worker traffic, so the forgery check has a live
+ *           |  cookie-setting rule to be defeated by.
+ *  Note     |  Without it the check fetches a domain nothing owns and
+ *           |  passes for the wrong reason.
+ * ------------------------------------------------------------------
  */
 const armPaintProbe = async (fixture: string) => {
   const disarm = async () => {
@@ -2278,11 +2249,13 @@ const armPaintProbe = async (fixture: string) => {
 };
 
 /**
- * Removes a diagnostic probe session from whatever registry is live now.
- *
- * The restore suite reboots the worker, which replaces both the registry and
- * the engine. Anything holding the objects it started with would clean up into
- * a discarded copy and leave the probe sessions in the real one.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Remove a diagnostic probe session from whatever registry
+ *           |  is live now.
+ *  Note     |  The restore suite reboots the worker, replacing registry
+ *           |  and engine; holding the old objects would clean up into a
+ *           |  discarded copy.
+ * ------------------------------------------------------------------
  */
 async function dropProbeSession(id: SessionId): Promise<void> {
   touched(registry.deleteSession(id));
@@ -2296,10 +2269,12 @@ function repaintSession(sessionId: SessionId): void {
 }
 
 /**
- * Unbinding loses the tab id from the mutation, and deleting a session orphans
- * every tab it held, so the tabs that most need their mark removed are exactly
- * the ones a session-keyed repaint cannot reach. Sweeping the agents instead
- * catches both, and the dedup above makes a no-op sweep free.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Repaint tabs a session-keyed repaint cannot reach.
+ *  How      |  Unbinding loses the tab id from the mutation and deleting
+ *           |  a session orphans its tabs, so sweeping the agents catches
+ *           |  both. The dedup makes a no-op sweep free.
+ * ------------------------------------------------------------------
  */
 function repaintOrphans(): void {
   for (const tabId of agents.keys()) {
@@ -2316,9 +2291,12 @@ function repaintAll(): void {
 let groupTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Native tab groups, where the browser has them. Debounced because binding a
- * session's worth of tabs fires one event per tab and each regroup is a handful
- * of round trips into the tab strip.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Native tab groups, where the browser has them.
+ *  How      |  Debounced because binding a session's tabs fires one event
+ *           |  per tab and each regroup is several round trips into the
+ *           |  tab strip.
+ * ------------------------------------------------------------------
  */
 function scheduleRegroup(): void {
   if (!settings.group || groupTimer) return;
@@ -2340,8 +2318,11 @@ async function regroupIfEnabled(): Promise<number> {
 }
 
 /**
- * Undoes grouping when the preference is turned off. Only groups carrying a
- * session's name are touched, so a group the user made by hand survives.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Undo grouping when the preference is turned off.
+ *  Note     |  Only groups carrying a session's name are touched, so a
+ *           |  group made by hand survives.
+ * ------------------------------------------------------------------
  */
 async function ungroupAll(): Promise<void> {
   const api = browserGroupApi();
@@ -2368,8 +2349,11 @@ async function ungroupAll(): Promise<void> {
 // ---------------------------------------------------------------- storage
 
 /**
- * What each tab's shim reported it settled on, for the panel and the suite.
- * Cache only: the shim is the authority on its own document.
+ * ------------------------------------------------------------------
+ *  Purpose  |  What each tab's shim reported it settled on, for the panel
+ *           |  and the suite.
+ *  Note     |  Cache only: the shim is the authority on its own document.
+ * ------------------------------------------------------------------
  */
 interface StorageReport {
   sid: string | null;
@@ -2381,12 +2365,14 @@ interface StorageReport {
 const storageState = new Map<number, StorageReport>();
 
 /**
- * Answers the shim's one question: which session is this tab, and should it
- * take a copy of the origin's own storage on the way in.
- *
- * A tab with no binding gets a null session, which puts the shim into
- * passthrough and leaves an unmanaged page behaving exactly as it would with
- * no extension installed. Answering nothing at all would park it forever.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Answer the shim's one question: which session is this tab,
+ *           |  and should it take a copy of the origin's own storage on
+ *           |  the way in.
+ *  Note     |  A tab with no binding gets a null session, which puts the
+ *           |  shim into passthrough. Answering nothing at all would park
+ *           |  it forever.
+ * ------------------------------------------------------------------
  */
 function answerStorage(tabId: number, port: chrome.runtime.Port, url: string): void {
   const binding = registry.binding(tabId);
@@ -2488,12 +2474,13 @@ function noteStorageState(
 }
 
 /**
- * Tells a tab's shim to forget the session it stamped into sessionStorage.
- *
- * The stamp is what removes the pending window from the second load onwards,
- * and it is read before the worker is asked. After a rebind that stamp names
- * the previous session, so the reload that follows would hand the page the old
- * account's storage for the few milliseconds before the correct answer lands.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Tell a tab's shim to forget the session it stamped into
+ *           |  sessionStorage.
+ *  How      |  The stamp is read before the worker is asked; after a
+ *           |  rebind it names the previous session, so the reload would
+ *           |  hand the page the old account's storage for a few ms.
+ * ------------------------------------------------------------------
  */
 function resetStorageStamp(tabId: number): void {
   const port = agents.get(tabId);
@@ -2506,10 +2493,12 @@ function resetStorageStamp(tabId: number): void {
 }
 
 /**
- * Re-answers a tab that is already running, for a rebind that did not need a
- * reload. Without this the shim keeps writing into the session the tab was in
- * when its document loaded, which is the wrong one from the moment the user
- * moved it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Re-answer a tab that is already running, for a rebind that
+ *           |  did not need a reload.
+ *  Note     |  Without this the shim keeps writing into the session the
+ *           |  tab was in when its document loaded.
+ * ------------------------------------------------------------------
  */
 function pushStorage(tabId: number): void {
   const port = agents.get(tabId);
@@ -2692,9 +2681,12 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 /**
- * Every entry point funnels through this. A cold worker must not process an
- * event against an empty registry, which would look exactly like an unmanaged
- * tab and let the profile jar through.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Every entry point funnels through this.
+ *  Note     |  A cold worker must not process an event against an empty
+ *           |  registry, which would look like an unmanaged tab and let
+ *           |  the profile jar through.
+ * ------------------------------------------------------------------
  */
 function whenReady(): Promise<void> {
   if (!ready) ready = boot();
@@ -2707,13 +2699,13 @@ const MASK_SCRIPT_ID = 'nvx-mask';
 const POLICY_SCRIPT_ID = 'nvx-policy';
 
 /**
- * The machine this is actually running on.
- *
- * Only the two fields the bucket refuses to fabricate. Timezone and locale are
- * checked against the exit IP by anybody who cares, and a Melbourne address
- * reporting a London clock is exactly the incoherence the whole posture design
- * exists to avoid, so Standardize takes them from here rather than inventing
- * them.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The machine this is actually running on.
+ *  How      |  Only the two fields the bucket refuses to fabricate. A
+ *           |  Melbourne address reporting a London clock is the
+ *           |  incoherence the posture design avoids, so Standardize
+ *           |  takes timezone and locale from here.
+ * ------------------------------------------------------------------
  */
 function realMachine(): RealMachine {
   let timezone = 'UTC';
@@ -2752,29 +2744,17 @@ function realMachine(): RealMachine {
 }
 
 /**
- * Domains where the mask could not reach a worker, so the posture comes off
- * there entirely.
- *
- * The mask already takes itself off inside such a document, but that is half a
- * withdrawal: the request headers belong to rules the worker installed, and a
- * MAIN world script has no way to reach them. Without this the page reports the
- * real browser while its own requests keep reporting the normalised one, which
- * is a contradiction the mask itself introduced.
- *
- * So both layers come off together. The domain is excluded from the header rules
- * and from the mask's own match set, because excluding it from only the first
- * would produce the same contradiction pointing the other way: an unmasked
- * header beside a page the mask is still patching.
- *
- * Domains rather than origins, because that is the granularity the rule
- * conditions and the match patterns both work in. A policy is per response, so a
- * site that refuses workers on one path and not another loses the posture across
- * the whole domain. That is the conservative direction.
- *
- * Held in memory rather than persisted. A policy is a property of the site
- * today, not forever, and the signal arrives again on the next load of a site
- * that still refuses, so the cost of forgetting is one load rather than a
- * permanently wrong answer.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Domains where the mask could not reach a worker, so the
+ *           |  posture comes off there entirely.
+ *  How      |  The mask takes itself off inside the document, but its
+ *           |  request headers belong to worker rules a MAIN script
+ *           |  cannot reach. So both layers come off together, excluded
+ *           |  from the header rules and the mask match set.
+ *  Note     |  Domains not origins, and held in memory: a policy is a
+ *           |  property of the site today, and the signal arrives again
+ *           |  on the next load.
+ * ------------------------------------------------------------------
  */
 const degraded = new Set<string>();
 
@@ -2790,15 +2770,14 @@ async function degrade(host: string): Promise<void> {
 }
 
 /**
- * The request headers that have to agree with the patched navigator.
- *
- * Installed before the mask is registered, and the mask is not registered at all
- * if this fails. A page whose `navigator.userAgent` says Chrome while its own
- * requests say Opera is the exact incoherence the posture exists to prevent, so
- * losing the canvas noise is the cheaper of the two failures. It is also the
- * honest one: an apply that throws here means the rule engine is not working,
- * and the cookie isolation running through the same engine is in no better
- * shape.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The request headers that have to agree with the patched
+ *           |  navigator.
+ *  How      |  Installed before the mask is registered, and the mask is
+ *           |  not registered if this fails. A navigator saying Chrome
+ *           |  while requests say Opera is the exact incoherence, so
+ *           |  losing the canvas noise is the cheaper failure.
+ * ------------------------------------------------------------------
  */
 async function applyPostureRules(hosts: string[]): Promise<void> {
   const agent =
@@ -2832,23 +2811,17 @@ async function applyPostureRules(hosts: string[]): Promise<void> {
 }
 
 /**
- * The fingerprint mask, registered only when a posture asks for it.
- *
- * Mirror is the default and fabricates nothing, so under Mirror this is not a
- * script that installs and does nothing: it is not registered at all. A MAIN
- * world script on every managed page is real cost and real detection surface,
- * and shipping it inert would be paying both for nothing.
- *
- * `matchOriginAsFallback` is the difference between covering a page and
- * covering a page's frames. An `about:blank` or `srcdoc` iframe inherits its
- * parent's origin but has no url of its own to match against, and section 11
- * ranks pristine natives from a fresh iframe as a High severity vector: a
- * fingerprinter that reads canvas from an untouched frame gets the real values
- * and sees them disagree with the patched top frame.
- *
- * The shim does not set it, and that is a genuine difference rather than an
- * oversight. Storage in an `about:blank` frame is the parent's storage and the
- * shim there would be a second set of proxies over the same store.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The fingerprint mask, registered only when a posture asks
+ *           |  for it.
+ *  How      |  Under Mirror it is not registered at all, since a MAIN
+ *           |  world script on every page is real cost and detection
+ *           |  surface. matchOriginAsFallback covers about:blank and
+ *           |  srcdoc frames, a High severity vector per section 11.
+ *  Note     |  The shim does not set it: storage in an about:blank frame
+ *           |  is the parent's, and a second set of proxies over one
+ *           |  store is wrong.
+ * ------------------------------------------------------------------
  */
 function maskRegistration(
   matches: string[]
@@ -2899,12 +2872,14 @@ function maskRegistration(
   ];
 }
 /**
- * Every host this extension is managing, which is what both the scripts and the
- * posture headers have to cover.
- *
- * Read from the sessions rather than from the tabs, because a session's hosts
- * outlive any particular tab on them and a rule that appears only while a tab
- * is open is a rule that is missing exactly when the tab is opened.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Every host this extension is managing, what both the
+ *           |  scripts and the posture headers must cover.
+ *  How      |  Read from the sessions, not the tabs: a session's hosts
+ *           |  outlive any particular tab, and a rule that appears only
+ *           |  while a tab is open is missing exactly when the tab is
+ *           |  opened.
+ * ------------------------------------------------------------------
  */
 function postureHosts(): string[] {
   if (settings.paused) return [];
@@ -2924,12 +2899,14 @@ function postureHosts(): string[] {
 let registeredMatches: string | null = null;
 
 /**
- * The agent is registered only for hosts a session actually cares about.
- *
- * Registering for every site would keep a port open on every page, which keeps
- * the worker alive permanently and spends the idle memory budget the design
- * promises. Scoping it means the worker stays warm exactly while you are
- * somewhere it matters, which is also exactly when the child-tab race happens.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The agent is registered only for hosts a session actually
+ *           |  cares about.
+ *  How      |  Registering for every site keeps a port open on every
+ *           |  page, which keeps the worker alive permanently. Scoping
+ *           |  keeps it warm exactly while you are somewhere it matters,
+ *           |  which is when the child-tab race happens.
+ * ------------------------------------------------------------------
  */
 function registerAgent(): Promise<void> {
   // Serialised. Registration is an unregister followed by a register, so two
@@ -3367,11 +3344,14 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 });
 
 /**
- * A burner is a session that exists only for its tab: an ephemeral session that
- * is not the anonymous holding pen. When its last tab closes there is nothing
- * left to protect, so it and its jar are dropped, which is the whole promise of a
- * burner tab, a login that leaves no trace once you are done with it. A non-burner
- * session outliving its tabs is the normal case and is left exactly alone.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A burner is a session that exists only for its tab.
+ *  How      |  When its last tab closes there is nothing left to protect,
+ *           |  so it and its jar are dropped, the whole promise of a
+ *           |  burner tab.
+ *  Note     |  A non-burner session outliving its tabs is the normal case
+ *           |  and is left alone.
+ * ------------------------------------------------------------------
  */
 async function reapBurner(sessionId: SessionId): Promise<void> {
   const session = registry.getSession(sessionId);
@@ -3416,9 +3396,12 @@ chrome.tabs.onAttached.addListener((tabId, info) => {
 // ------------------------------------------------------------- navigation
 
 /**
- * Takes a tab out of the leave-it-real set and puts the headers back on.
- *
- * Costs one rule write per stale tab, once, and then never again for that tab.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Take a tab out of the leave-it-real set and put the
+ *           |  headers back on.
+ *  Note     |  Costs one rule write per stale tab, once, then never again
+ *           |  for that tab.
+ * ------------------------------------------------------------------
  */
 async function remask(tabId: number): Promise<void> {
   if (!unmaskedTabs.delete(tabId)) return;
@@ -3462,13 +3445,13 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
 });
 
 /**
- * The browser giving up, which is the one signal that needs no interpretation.
- *
- * `ERR_TOO_MANY_REDIRECTS` in a managed tab means a chain ran past Chromium's
- * own limit, which no working sign-in does. Believed on sight rather than
- * counted, because by the time the browser has said this the loop has already
- * run twenty times and every one of those hops presented a cookie set to a
- * provider that is keeping score.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The browser giving up, the one signal that needs no
+ *           |  interpretation.
+ *  How      |  ERR_TOO_MANY_REDIRECTS in a managed tab means a chain ran
+ *           |  past Chromium's own limit, which no working sign-in does.
+ *           |  Believed on sight: by now the loop has run twenty times.
+ * ------------------------------------------------------------------
  */
 chrome.webNavigation.onErrorOccurred.addListener((details) => {
   if (details.frameId !== 0) return;
@@ -3482,13 +3465,13 @@ chrome.webNavigation.onErrorOccurred.addListener((details) => {
 // ----------------------------------------------------------------- guard
 
 /**
- * Blast radius, watched on every request.
- *
- * onBeforeRequest rather than onSendHeaders, because this is the only stage
- * that sees a request before it leaves and the decision has to be recorded
- * even when a declarative rule is about to refuse it. Observation only: the
- * refusal itself is a rule on manifest v3 and a veto in the blocking listener
- * on v2, because a v3 listener's return value is ignored.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Blast radius, watched on every request.
+ *  How      |  onBeforeRequest sees a request before it leaves and
+ *           |  records the decision even when a rule is about to refuse
+ *           |  it. Observation only: the refusal is a rule on MV3 and a
+ *           |  veto in the blocking listener on MV2.
+ * ------------------------------------------------------------------
  */
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
@@ -3531,11 +3514,12 @@ chrome.webRequest.onBeforeRequest.addListener(
 const GUARDED_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
- * Tells the tab what just happened.
- *
- * A warning is a transient card; a refusal is a persistent one carrying the
- * only two things the user can do about it, which is to accept it or to allow
- * that one endpoint for a few minutes.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Tell the tab what just happened.
+ *  How      |  A warning is a transient card; a refusal is a persistent
+ *           |  one carrying the only two choices, to accept it or to
+ *           |  allow that one endpoint for a few minutes.
+ * ------------------------------------------------------------------
  */
 function warnInTab(tabId: number, entry: AuditEntry): void {
   const port = agents.get(tabId);
@@ -3618,14 +3602,15 @@ chrome.webRequest.onHeadersReceived.addListener(
 );
 
 /**
- * Desync detection reads onSendHeaders, not onBeforeSendHeaders.
- *
- * Measured on Opera 150: onBeforeSendHeaders reports the request as the
- * browser built it, before declarativeNetRequest rewrites it. Comparing there
- * reports every managed request as a leak, because it sees the profile jar
- * that the rule is about to replace. onSendHeaders fires after all
- * modification and carries the headers that actually go on the wire, which is
- * the only point where the comparison means anything.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Desync detection reads onSendHeaders, not
+ *           |  onBeforeSendHeaders.
+ *  How      |  Measured on Opera 150: onBeforeSendHeaders reports the
+ *           |  request before DNR rewrites it, so it sees the profile jar
+ *           |  the rule is about to replace and calls every managed
+ *           |  request a leak. onSendHeaders carries what actually goes
+ *           |  on the wire.
+ * ------------------------------------------------------------------
  */
 chrome.webRequest.onSendHeaders.addListener(
   (details) => {
@@ -3713,18 +3698,14 @@ chrome.webRequest.onSendHeaders.addListener(
 // ------------------------------------------------------------------ alarm
 
 /**
- * The toolbar button, when isolation is not holding.
- *
- * Everything above measures; this is the only thing that interrupts. Until it
- * existed the leak counter lived in a popup, which meant a live leak and a
- * clean run looked identical to anybody not already looking at the popup, and
- * the whole point of measuring is that you find out without going to check.
- *
- * Only `foreign` reaches the toolbar. `stale` fires once per hop of every
- * ordinary sign-in and `missing` is usually a rule that has not landed yet, so
- * badging the total would put a red number on the button during a normal
- * login. A badge that is usually on is a badge nobody reads, and one that
- * cries wolf during sign-in is worse than none.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The toolbar button, when isolation is not holding.
+ *  How      |  Everything above measures; this is the only thing that
+ *           |  interrupts. Only foreign reaches the toolbar: stale fires
+ *           |  once per hop of every sign-in and missing is usually a
+ *           |  rule not landed yet.
+ *  Note     |  A badge that is usually on is one nobody reads.
+ * ------------------------------------------------------------------
  */
 /** Only redrawn when the number changes, since this runs off a hot path. */
 let badged = -1;
@@ -3764,10 +3745,12 @@ interface CandidateSummary {
 }
 
 /**
- * One account, as the first run screen shows it.
- *
- * A group rather than a domain, because a person has accounts and the jar has
- * domains, and the whole job of this screen is to translate between the two.
+ * ------------------------------------------------------------------
+ *  Purpose  |  One account, as the first run screen shows it.
+ *  Note     |  A group rather than a domain, because a person has
+ *           |  accounts and the jar has domains, and this screen
+ *           |  translates between the two.
+ * ------------------------------------------------------------------
  */
 interface GroupSummary {
   key: string;
@@ -3805,8 +3788,11 @@ async function readCandidates(): Promise<AdoptionCandidate[]> {
 }
 
 /**
- * Everything the profile is already carrying, ranked by how much it looks like
- * a signed-in account rather than a preference cookie.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Everything the profile is already carrying, ranked by how
+ *           |  much it looks like a signed-in account rather than a
+ *           |  preference cookie.
+ * ------------------------------------------------------------------
  */
 async function scanForAdoption(): Promise<{
   candidates: CandidateSummary[];
@@ -3858,11 +3844,12 @@ async function scanForAdoption(): Promise<{
 }
 
 /**
- * Turns a selection into a session.
- *
- * Copies, never moves. The profile jar is left exactly as it was, so an
- * unmanaged tab keeps working and undoing this costs nothing but deleting the
- * session that was just made.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Turn a selection into a session.
+ *  Note     |  Copies, never moves. The profile jar is left as it was, so
+ *           |  an unmanaged tab keeps working and undoing this costs only
+ *           |  deleting the session.
+ * ------------------------------------------------------------------
  */
 async function adopt(msg: {
   domains?: unknown;
@@ -3958,16 +3945,15 @@ async function adopt(msg: {
 // ------------------------------------------------------------- validation
 
 /**
- * The identity ramp, in the order sessions are handed colours.
- *
- * Ordered so consecutive picks sit far apart on the wheel rather than
- * alphabetically or by hue: the second session somebody makes must not look
- * like the first one on a dim screen, and cyan followed by azure did.
- *
- * This list and COLORS in extension/panel.js are the same list in the same
- * order on purpose. The panel picks the swatch it is about to send and the
- * worker picks the fallback when nothing was sent, and if they disagree the
- * colour a user saw offered is not the colour the session gets.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The identity ramp, in the order sessions are handed
+ *           |  colours.
+ *  How      |  Ordered so consecutive picks sit far apart on the wheel:
+ *           |  the second session must not look like the first on a dim
+ *           |  screen, and cyan followed by azure did.
+ *  Note     |  This list and COLORS in panel.js are the same list in the
+ *           |  same order.
+ * ------------------------------------------------------------------
  */
 const RAMP = ['cyan', 'coral', 'jade', 'violet', 'amber', 'azure', 'magenta', 'chalk'];
 const MAX_LABEL = 64;
@@ -3979,15 +3965,14 @@ function reservedId(id: string): boolean {
 }
 
 /**
- * New sessions block third parties they have no cookies for.
- *
- * Chosen rather than inherited from the browser, and it is the one default here
- * that changes what goes on the wire without being asked. The reasoning: a
- * session exists to be separate, and a tracker handed the same profile
- * identifier from every session makes them one person to anyone counting, which
- * defeats the thing the user came for. What it costs is an embedded third party
- * the user is signed into appearing signed out, which is visible, reversible in
- * one click, and listed with the evidence in the panel.
+ * ------------------------------------------------------------------
+ *  Purpose  |  New sessions block third parties they have no cookies for.
+ *  How      |  A session exists to be separate, and a tracker handed the
+ *           |  same identifier from every session makes them one person
+ *           |  to anyone counting.
+ *  Note     |  The cost is an embedded third party appearing signed out,
+ *           |  reversible in one click and listed with the evidence.
+ * ------------------------------------------------------------------
  */
 const DEFAULT_THIRD_PARTY: 'allow' | 'block' = 'block';
 
@@ -4007,11 +3992,13 @@ function cleanColor(raw: unknown): string {
 }
 
 /**
- * Pinned domains become content script match patterns, and one malformed entry
- * makes registerContentScripts throw. Because registration is an unregister
- * followed by a register, that failure does not leave the old registration
- * standing: it leaves none at all, and the mark and the chooser stop working
- * everywhere. So they are cleaned at the door rather than trusted.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Pinned domains become content script match patterns, and
+ *           |  one malformed entry makes registerContentScripts throw.
+ *  Note     |  Registration is an unregister then a register, so that
+ *           |  failure leaves none at all and the mark and chooser stop
+ *           |  everywhere. Cleaned at the door.
+ * ------------------------------------------------------------------
  */
 function cleanPinned(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -4035,14 +4022,16 @@ function nextColor(): string {
 }
 
 /**
- * Normalises one cookie from an imported backup into a valid jar cookie, or null
- * if it is not one.
- *
- * An export is this jar's own snapshot, so a well-formed backup round-trips
- * exactly; this exists for the hand-edited or foreign file, filling the fields a
- * cookie needs with safe defaults and rejecting anything without the three that
- * cannot be defaulted. It is the one place untrusted file contents enter the
- * jar, so it validates rather than trusts.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Normalise one cookie from an imported backup into a valid
+ *           |  jar cookie, or null.
+ *  How      |  A well-formed export round-trips exactly; this fills
+ *           |  defaults for the hand-edited or foreign file and rejects
+ *           |  anything without the three fields that cannot be
+ *           |  defaulted.
+ *  Note     |  The one place untrusted file contents enter the jar, so it
+ *           |  validates.
+ * ------------------------------------------------------------------
  */
 function cleanImportedCookie(raw: unknown): import('../jar/cookie.js').Cookie | null {
   if (!raw || typeof raw !== 'object') return null;
@@ -4072,11 +4061,13 @@ function cleanImportedCookie(raw: unknown): import('../jar/cookie.js').Cookie | 
 }
 
 /**
- * Puts a cookie in a session's jar exactly as a Set-Cookie would.
- *
- * Through the real parser rather than by constructing a Cookie, so a suite
- * cannot seed something the browser would have rejected and then prove
- * isolation about a cookie that could never have existed.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Put a cookie in a session's jar exactly as a Set-Cookie
+ *           |  would.
+ *  Note     |  Through the real parser, so a suite cannot seed something
+ *           |  the browser would have rejected and then prove isolation
+ *           |  about a cookie that could never exist.
+ * ------------------------------------------------------------------
  */
 async function seedCookie(sessionId: string, url: string, header: string): Promise<unknown> {
   await whenReady();
@@ -4099,11 +4090,12 @@ function ownerSessionFor(url: string) {
 // ------------------------------------------------------------- lifecycle
 
 /**
- * One panel, not one per click.
- *
- * Clicking the action repeatedly is the normal way to check on things, and
- * spawning a tab each time buries the browser in identical panels that all
- * show the same state.
+ * ------------------------------------------------------------------
+ *  Purpose  |  One panel, not one per click.
+ *  Note     |  Clicking the action repeatedly is the normal way to check
+ *           |  on things, and spawning a tab each time buries the browser
+ *           |  in identical panels.
+ * ------------------------------------------------------------------
  */
 async function openPanel(): Promise<void> {
   const url = chrome.runtime.getURL('diagnostics.html');
@@ -4120,22 +4112,24 @@ async function openPanel(): Promise<void> {
 }
 
 /**
- * Dead while the manifest declares a popup, which it does: a browser fires this
- * only when there is no popup to open. Kept because it costs nothing and is the
- * correct behaviour for any build that ships without one, and because removing
- * it would leave the toolbar button doing nothing at all if the popup were ever
- * pulled. Alt+Shift+S and the popup's own link are what reach the panel now.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Fires only when there is no popup to open, so it is dead
+ *           |  while the manifest declares one.
+ *  Note     |  Kept because it costs nothing and is correct for any build
+ *           |  shipped without a popup. Alt+Shift+S and the popup's own
+ *           |  link reach the panel now.
+ * ------------------------------------------------------------------
  */
 actionApi()?.onClicked.addListener(() => void openPanel());
 
 /**
- * Moves the active tab to the Nth session, for the keyboard shortcuts.
- *
- * N is the position in the session list the user sees, one-based, so "move to
- * session 2" means the second one however they are ordered. Out of range, or no
- * active tab, is a quiet no-op: a shortcut that does nothing visible is better
- * than one that guesses. The move is remembered so the popup can offer to undo
- * it, because a keyboard move happens with nothing on screen to take it back.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Move the active tab to the Nth session, for the keyboard
+ *           |  shortcuts.
+ *  How      |  N is the position in the session list the user sees,
+ *           |  one-based. Out of range or no active tab is a quiet no-op.
+ *  Note     |  The move is remembered so the popup can offer to undo it.
+ * ------------------------------------------------------------------
  */
 async function moveActiveToNth(n: number): Promise<void> {
   const sessions = registry.listSessions().filter((s) => s.id !== ANON);
@@ -4157,16 +4151,13 @@ chrome.commands?.onCommand.addListener((command) => {
 });
 
 /**
- * A record of which lifecycle events actually fire, kept because they differ
- * between how the extension is loaded and the difference decides whether a
- * browser start can be detected at all.
- *
- * An extension loaded from the command line is not recorded in the profile as
- * installed, so the browser has nothing to start it for: onStartup never fires
- * and onInstalled fires every launch instead. Installed properly, the reverse.
- * Both paths reach the same code, but only one of them exercises the signal a
- * real user's browser will send, which is worth being able to see rather than
- * argue about.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A record of which lifecycle events actually fire.
+ *  How      |  They differ by how the extension is loaded: a command-line
+ *           |  load never fires onStartup and fires onInstalled every
+ *           |  launch; installed properly, the reverse. The difference
+ *           |  decides whether a browser start can be detected.
+ * ------------------------------------------------------------------
  */
 async function noteLifecycle(event: string, detail = ''): Promise<void> {
   try {
@@ -4181,29 +4172,24 @@ async function noteLifecycle(event: string, detail = ''): Promise<void> {
 }
 
 /**
- * Right-click a link, open it signed in as a chosen session.
- *
- * The seamless half of the account model. A work link in a chat should reach
- * the work account in one action, not a copy-paste into a tab you first
- * remembered to move. It uses the same safe path as the Sign in here button, so
- * the tab is in the session before the link is fetched.
- *
- * Rebuilt whenever the sessions change, because the menu is a snapshot of them.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Right-click a link, open it signed in as a chosen session.
+ *  How      |  A work link should reach the work account in one action.
+ *           |  It uses the same safe path as Sign in here, so the tab is
+ *           |  in the session before the link is fetched.
+ *  Note     |  Rebuilt whenever the sessions change.
+ * ------------------------------------------------------------------
  */
 /**
- * The right-click menu, rebuilt whenever the session list changes.
- *
- * Two entries, because a right-click reaches two different things. On a link,
- * "Open link in session" sends where the link points into a session without
- * opening it in the wrong one first. On the page itself, "This tab" moves the
- * tab you are on into a session, or hands it back, which is the single-tab
- * counterpart to the bulk move in the popup and saves opening the popup at all.
- *
- * Both are gated on there being at least one real session, because every
- * action here targets one and a menu full of dead ends is worse than no menu.
- * The menus are global across tabs, so "hand back" cannot know in advance
- * whether the clicked tab is bound; it is always offered and no-ops on a tab
- * that was never in a session, which is harmless.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The right-click menu, rebuilt whenever the session list
+ *           |  changes.
+ *  How      |  "Open link in session" sends a link into a session without
+ *           |  opening it in the wrong one first; "This tab" moves the
+ *           |  current tab or hands it back.
+ *  Note     |  Gated on there being at least one real session; "hand
+ *           |  back" is always offered and no-ops on an unbound tab.
+ * ------------------------------------------------------------------
  */
 function rebuildMenus(): void {
   if (!chrome.contextMenus) return;
@@ -4362,23 +4348,17 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 /**
- * Whether the browser itself has just started, as opposed to the worker waking
- * or the extension reloading.
- *
- * Two signals, because neither is enough alone.
- *
- * chrome.storage.session is cleared when the browser session ends, which is
- * exactly the question. It is also cleared when the extension is reloaded or
- * updated, and treating an update as a restart would sign the user out of
- * everything the moment a new version shipped.
- *
- * So it is paired with the tabs. Across a browser restart every tab comes back
- * with a new id, so no persisted binding matches a live tab. Across an
- * extension reload the tabs never went anywhere and their ids still match. One
- * surviving binding is proof this browser has been running all along.
- *
- * onStartup would be the obvious signal and is not usable: measured in Opera GX
- * with the extension loaded from the command line, it does not fire at all.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether the browser itself has just started, not the
+ *           |  worker waking or the extension reloading.
+ *  How      |  chrome.storage.session clears when the browser session
+ *           |  ends, but also on reload or update, so it is paired with
+ *           |  the tabs: across a restart every tab returns with a new
+ *           |  id, so one surviving binding proves the browser kept
+ *           |  running.
+ *  Note     |  onStartup is not usable: in Opera GX loaded from the
+ *           |  command line it does not fire.
+ * ------------------------------------------------------------------
  */
 async function newBrowserSession(survivingBindings: number): Promise<boolean> {
   const area = (chrome.storage as { session?: chrome.storage.StorageArea }).session;
@@ -4398,23 +4378,15 @@ async function newBrowserSession(survivingBindings: number): Promise<boolean> {
 }
 
 /**
- * Forgets what the browser would have forgotten.
- *
- * A cookie with no expiry lasts a browser session, and this is where one ends.
- * Persisting the jar means persisting those too unless something drops them,
- * and a session cookie that outlives its browser is worse than useless: the
- * site is handed a session id it stopped honouring hours ago.
- *
- * Measured, and it is the whole of a reported infinite loop. A twelve hour old
- * MoodleSession went out on the first request of the day, Moodle could not
- * validate it and bounced to the identity provider, the identity provider's own
- * JSESSIONID was equally dead, and the two sent the tab back and forth. One of
- * the two sessions had also lost MDL_SSP_SessID along the way, which is the
- * value tying a SAML request to its answer, so that chain could never have
- * completed however many times it went round.
- *
- * Persistent cookies stay. Those are the ones that genuinely mean "remember me",
- * and dropping them would sign the user out of everything on every restart.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Forget what the browser would have forgotten.
+ *  How      |  A cookie with no expiry lasts a browser session, and this
+ *           |  is where one ends; persisting the jar would keep them.
+ *           |  Persistent cookies stay.
+ *  Bug-Fix  |  A twelve-hour-old MoodleSession bounced between service
+ *           |  and provider forever, one side also missing
+ *           |  MDL_SSP_SessID, so that chain could never complete.
+ * ------------------------------------------------------------------
  */
 function dropSessionCookies(): void {
   let dropped = 0;
@@ -4438,13 +4410,15 @@ function dropSessionCookies(): void {
 // ------------------------------------------------------------------- api
 
 /**
- * Commands come from the extension's own pages, never from a page.
- *
- * A content script shares this extension's message channel, and the agent runs
- * in every managed tab. Nothing sends commands from there today, but a
- * compromised renderer could, and the command surface reaches every account:
- * adoptScan alone answers with the address of every signed-in identity in the
- * profile. A sender with a tab is a content script; the panel has none.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Commands come from the extension's own pages, never from a
+ *           |  page.
+ *  How      |  A content script shares this extension's message channel
+ *           |  and runs in every managed tab; a compromised renderer
+ *           |  could reach a surface where adoptScan alone lists every
+ *           |  signed-in identity. A sender with a tab is a content
+ *           |  script; the panel has none.
+ * ------------------------------------------------------------------
  */
 function fromOwnPage(sender: chrome.runtime.MessageSender): boolean {
   if (sender.id && sender.id !== chrome.runtime.id) return false;
@@ -5505,12 +5479,14 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 });
 
 /**
- * The surface below, reached from inside itself.
- *
- * A suite phase that wants a session wants exactly what the suite driver would
- * do, and reaching for the same entry point rather than a second path into the
- * registry is what keeps the two from drifting. Lazy, because the object does
- * not exist until the assignment underneath has run.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The surface below, reached from inside itself.
+ *  How      |  A suite phase that wants a session wants what the driver
+ *           |  would do, so it reaches the same entry point rather than a
+ *           |  second path into the registry.
+ *  Note     |  Lazy, because the object does not exist until the
+ *           |  assignment underneath has run.
+ * ------------------------------------------------------------------
  */
 function nvxSurface(): {
   createSession: (id: string, pinned?: string[]) => Promise<string>;
@@ -5527,12 +5503,15 @@ function nvxSurface(): {
 }
 
 /**
- * Diagnostic surface.
- *
- * The integration suite drives the kernel through this rather than through
- * simulated events, so what it exercises is the same code a real tab does.
- * It exposes no capability the message API above does not already grant, and
- * it is only reachable from the worker's own context.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Diagnostic surface.
+ *  How      |  The integration suite drives the kernel through this
+ *           |  rather than simulated events, so it exercises the same
+ *           |  code a real tab does.
+ *  Note     |  It exposes no capability the message API does not already
+ *           |  grant, and is only reachable from the worker's own
+ *           |  context.
+ * ------------------------------------------------------------------
  */
 Object.assign(globalThis, {
   __nvx: {
