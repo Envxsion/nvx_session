@@ -1,43 +1,37 @@
 /**
- * One listener, in every frame, for the one thing the mask cannot report about
- * itself.
- *
- * When a policy refuses the mask's worker the mask takes itself off, and that is
- * only half a withdrawal: the request headers are rules the worker installed and
- * a MAIN world script has no channel to reach them. Without this the page ends up
- * reporting the real browser while its own requests report the normalised one,
- * which is the contradiction the withdrawal exists to end.
- *
- * Two things decide the shape of this file, and both are worth stating because
- * neither is obvious.
- *
- * **It listens rather than relays.** The mask hears the same event and could
- * simply pass it on, but anything the mask can dispatch the page can dispatch,
- * because they share a world. A fingerprinter that could ask to have the posture
- * withdrawn would just ask, and be handed the real machine. A
- * `SecurityPolicyViolationEvent` a page constructs carries `isTrusted: false` and
- * only the browser can raise a trusted one, so that check is the authentication
- * and this has to run somewhere the page cannot reach to make it worth anything.
- *
- * **It is its own script rather than part of the agent.** The agent is
- * registered on the top frame only, because it binds tabs and draws the chooser
- * and neither belongs in an iframe. A refusal inside a frame was therefore never
- * heard. Widening the agent would evaluate all of it in every frame for the sake
- * of one listener, so the listener moved here instead: thirty lines, one
- * listener, and nothing else to go wrong in a frame.
- *
- * It costs nothing until something is refused. No port is opened, no state is
- * kept, and the message is sent once.
+ * ------------------------------------------------------------------
+ *  Title    |  Worker-policy listener
+ *  Ref      |  securitypolicyviolation, mask.blocked, mask/index.ts
+ *  ID       |  M3 (mask)
+ * ------------------------------------------------------------------
+ *  Purpose  |  One listener, in every frame, for the one thing the
+ *           |  mask cannot report about itself: a CSP refusal of its
+ *           |  worker.
+ *  How      |  When a policy refuses the mask's worker the mask takes
+ *           |  itself off, but the request headers it installed are
+ *           |  out of a MAIN-world script's reach; this relays the
+ *           |  refusal so the worker can withdraw them too.
+ *  Note     |  It listens rather than relays: anything the mask can
+ *           |  dispatch the page can too, so the isTrusted check on a
+ *           |  SecurityPolicyViolationEvent is the authentication and
+ *           |  must run where the page cannot reach. Its own script,
+ *           |  not the agent, because the agent is top-frame only and
+ *           |  a frame's refusal was never heard. Costs nothing until
+ *           |  something is refused.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 /**
- * Only the directives that can actually stop a worker, and only a blob.
- *
- * The mask's copy of this test was once broad enough to include `script-src`,
- * which describes an enormous share of the real web and would have withdrawn the
- * posture almost everywhere. The blocked URI has to be ours as well, because a
- * page can perfectly well have its own worker refused for reasons that have
- * nothing to do with us.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Only the directives that can actually stop a worker,
+ *           |  and only a blob.
+ *  Note     |  This test once included `script-src`, which describes
+ *           |  much of the real web and would have withdrawn the
+ *           |  posture almost everywhere. The blocked URI has to be
+ *           |  ours too, since a page can have its own worker refused
+ *           |  for reasons unrelated to us.
+ * ------------------------------------------------------------------
  */
 const WORKER_DIRECTIVES = /^(worker-src|child-src)/;
 

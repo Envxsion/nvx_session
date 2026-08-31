@@ -1,35 +1,27 @@
 /**
- * The storage shim. Runs in the MAIN world at document_start.
- *
- * It replaces `localStorage` and `sessionStorage` with objects that read and
- * write the same origin store through a per-session namespace, so two sessions
- * on one site stop overwriting and stop reading each other.
- *
- * Three things make this awkward, and all three are visible in the code below.
- *
- * `Storage` is synchronous. A read answers before the next statement runs, and
- * there is no synchronous path from a page to the service worker, so the data
- * has to already be in the origin's own store. That is why this namespaces the
- * real store rather than proxying to the kernel.
- *
- * The shim knows it is running before it knows which session it is running as.
- * The tab binding lives in the worker and takes a message round trip to fetch.
- * So the shim installs in a pending state that journals writes in memory and
- * reads through to the origin's own unnamespaced data, which is exactly what
- * the page would have seen anyway, and rebases onto the session the moment the
- * agent says which one it is. A second load in the same tab has no pending
- * window at all, because the first one left a stamp in sessionStorage.
- *
- * And it has to be invisible. A page that stores something called `getItem`, or
- * enumerates the store, or listens for storage events from other tabs, has to
- * behave exactly as it did. Hence the proxy rather than a handful of patched
- * methods.
- *
- * No imports, no exports: a content script is a classic script, and one export
- * makes tsc emit module syntax that fails to load with no diagnostic. Wrapped
- * in a function because every classic script in this project shares one TypeScript
- * global scope. The key maths is duplicated from src/store/keys.ts on purpose;
- * tests/storage.test.ts asserts the two agree rather than trusting them to.
+ * ------------------------------------------------------------------
+ *  Title    |  Storage shim
+ *  Ref      |  View, expose, commit, src/store/keys.ts (key maths)
+ *  ID       |  M4 (storage shim)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Replace localStorage and sessionStorage with objects
+ *           |  that namespace the origin store per session, so two
+ *           |  sessions on one site stop reading and overwriting each
+ *           |  other. Runs in the MAIN world at document_start.
+ *  How      |  Storage is synchronous with no sync path to the
+ *           |  worker, so the real store is namespaced rather than
+ *           |  proxied to the kernel. The shim installs before it
+ *           |  knows its session, so it parks pending, journals
+ *           |  writes and reads through, then rebases on commit; a
+ *           |  sessionStorage stamp removes the pending window on the
+ *           |  next load. A Proxy, not patched methods, so
+ *           |  enumeration and storage events stay invisible.
+ *  Note     |  No imports or exports (a classic script; one export
+ *           |  makes tsc emit failing module syntax). Key maths is
+ *           |  duplicated from src/store/keys.ts on purpose; the
+ *           |  suite asserts the two agree.
+ *  Author   |  Ojas Kekre, 24/08/2026
+ * ------------------------------------------------------------------
  */
 
 (function nvxStorageShim(): void {
@@ -876,28 +868,22 @@
 })();
 
 /**
- * Takes the session mark off a page this extension has stopped maintaining.
- *
- * The mark is a `link rel=icon` the agent puts into the document, so it belongs
- * to the page rather than to us, and removing the extension does not remove it.
- * Nothing of ours gets to tidy up either: unloading an extension destroys its
- * isolated world synchronously, so the agent's port disconnect handler never
- * runs, its `chrome.runtime` access throws, and the coloured dot simply stays
- * on every managed tab, explained by nothing, until each one is next reloaded.
- * That was reported from real use and it is the right thing to report: junk left
- * behind after an uninstall is a promise broken at the last possible moment.
- *
- * This runs in the page's own world, which is ordinary page script once it has
- * executed, so it survives exactly what the agent cannot. It cannot ask whether
- * the extension is installed, having no extension APIs by definition. What it
- * can read is the timestamp the agent refreshes every few seconds, and a stamp
- * that has stopped moving means nobody is left to move it.
- *
- * Deliberately slow and deliberately forgiving. Six seconds between checks and
- * a twenty second staleness threshold, so a browser that throttled a background
- * tab's timers has to have stopped ours for a very long time before this fires,
- * and the worst case if it does fire wrongly is that a tab shows its own icon
- * for a moment before the agent paints again.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Take the session mark off a page this extension has
+ *           |  stopped maintaining.
+ *  How      |  Runs in the page's own world, so it survives what the
+ *           |  agent cannot. It reads the timestamp the agent
+ *           |  refreshes every few seconds; a stamp that stopped
+ *           |  moving means nobody is left to move it.
+ *  Note     |  The mark is a `link rel=icon` the agent added, so it
+ *           |  belongs to the page; unloading the extension destroys
+ *           |  the agent's world synchronously, so its disconnect
+ *           |  handler never runs and the dot would stay on every
+ *           |  managed tab until reload. Reported from real use.
+ *           |  Deliberately slow and forgiving (6s checks, 20s
+ *           |  staleness); worst case it shows the page's own icon
+ *           |  for a moment before the agent repaints.
+ * ------------------------------------------------------------------
  */
 function watchTheMark(): void {
   const MARKED = 'data-nvx-mark';

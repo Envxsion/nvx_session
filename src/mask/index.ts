@@ -1,35 +1,27 @@
 /**
- * The fingerprint mask. Runs in the MAIN world at document_start.
- *
- * It patches the canvas read surfaces so they return the same sub-perceptual
- * noise for the same drawing, forever, and does nothing else. Every other
- * surface in the section 10 table is untouched and reported as untouched.
- *
- * Four constraints shape all of it, and none of them are negotiable.
- *
- * It cannot yield. Fingerprint patches have to land before any page script runs,
- * and every channel to the worker is asynchronous, so nothing here may await
- * anything. The bundle is therefore a compiled constant rather than something
- * fetched, and `tests/persona.test.ts` asserts it equals what the compiler
- * produces for the Standardize bucket. That is the same arrangement the storage
- * shim has with `src/store/keys.ts`, for the same reason, and it is the price of
- * being synchronous.
- *
- * It cannot import. A content script is a classic script, and section 17 asks
- * for zero dependencies here besides: every byte in this world is detection
- * surface, and a helper emitted by a compiler is a fingerprint of the compiler.
- * So `mix32` and the noise loop are copied from `src/persona/noise.ts` and held
- * to it by test.
- *
- * It must be invisible. `toString` on a patched function has to say
- * `[native code]`, the descriptor shape has to match what it replaced, and
- * nothing may throw from a frame the page can see. A patch that is detectable is
- * worse than no patch, because it says something is being hidden.
- *
- * It must fail closed. A worker that cannot be reached reads pristine values and
- * the page sees the worker and the main thread disagree, which is a stronger
- * signal than no spoofing at all. When that happens the mask takes itself off
- * rather than leaving two fingerprints on one machine.
+ * ------------------------------------------------------------------
+ *  Title    |  Fingerprint mask
+ *  Ref      |  active, applyCanvasNoise, wrap, offEverything
+ *  ID       |  M3 (mask)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Patch the canvas, WebGL, audio and navigator read
+ *           |  surfaces so they return the same sub-perceptual noise
+ *           |  for the same drawing. Runs in the MAIN world at
+ *           |  document_start. A free build resolves every posture to
+ *           |  the Standardize bucket.
+ *  How      |  It cannot yield: patches must land before any page
+ *           |  script, so nothing awaits and the bundle is a compiled
+ *           |  constant (persona.test.ts asserts it equals the
+ *           |  Standardize compile). It cannot import: every byte is
+ *           |  detection surface, so mix32 and the noise loops are
+ *           |  copied from src/persona and held by test.
+ *  Note     |  It must be invisible: a patched function's toString
+ *           |  must say [native code] and nothing may throw where the
+ *           |  page can see. It must fail closed: an unreachable
+ *           |  worker means the mask takes itself off rather than
+ *           |  leaving two disagreeing fingerprints on one machine.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 (function nvxMask(inherited?: string): void {
@@ -101,26 +93,16 @@
   }
 
   /**
-   * The bundle actually in force, resolved on first use rather than on install.
+   * The bundle actually in force, resolved on first use and cached.
    *
-   * Laziness is the whole answer to the first load of a tab, and it is worth
-   * being exact about why. There is no material in a tab's first document,
-   * because nothing has committed in it yet, and the mask cannot wait: a
-   * fingerprint patch that yields has already lost. Resolving when a masked
-   * surface is first read costs nothing and buys almost everything, because the
-   * material lands within a few milliseconds of document_start while nearly
-   * every real fingerprinting script runs after its own network fetch.
-   *
-   * Cached from the first read onwards, and that is not an optimisation either.
    * A surface that answered one way at ten milliseconds and another way at fifty
    * is the single loudest thing this file could do: reading a canvas twice and
    * diffing is the first probe anybody writes. So the first read fixes the
-   * answer for the life of the document, whichever answer it was.
+   * answer for the life of the document.
    *
-   * With no material the answer is the Standardize bucket, never the real
-   * machine. Persona therefore never degrades below the posture beneath it,
-   * which is the property that makes the window above tolerable rather than a
-   * hole.
+   * In a free build that answer is always the Standardize bucket: there is no
+   * persona material, and the per-session fabrication is a Pro algorithm in the
+   * private submodule copy of this file.
    */
   let resolved: Active | null = null;
 
@@ -661,14 +643,10 @@
     const bucket = vendor && os ? (CARDS[`${os}:${vendor}`] ?? null) : null;
 
     /**
-     * Under Persona the model moves and the vendor does not, which is the same
-     * restraint the bucket itself was built on: WebGPU names the real vendor and
-     * nothing here fakes it, so a persona claiming a different one contradicts a
-     * surface this build deliberately leaves alone.
-     *
-     * Falls back to the bucket's own card whenever there is no material or no
-     * model list, so an unrecognised machine is still left entirely alone rather
-     * than described badly.
+     * A free build carries no persona material, so this is always the bucket's
+     * own card. It leaves the real strings alone whenever there is no bucket for
+     * the machine, so an unrecognised one is left entirely alone rather than
+     * described badly.
      */
     // Free builds carry no persona material, so the card is always the bucket's
     // own. The persona model draw is a Pro algorithm in the submodule copy.

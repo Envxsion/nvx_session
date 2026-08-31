@@ -1,22 +1,20 @@
 /**
- * The in-page agent.
- *
- * Runs in the ISOLATED world of every managed tab and does three things that
- * have to happen inside a page.
- *
- * It holds a long-lived port to the service worker. That is not decoration:
- * a port keeps the worker alive, and a cold worker is exactly what loses the
- * race when a managed tab opens a child tab, because the child's first request
- * can leave before the worker has woken up to bind it.
- *
- * It renders the identity chooser, in a closed shadow root so page CSS cannot
- * reach it and page script cannot read it.
- *
- * And it applies the session mark to the tab, which is the one identity channel
- * available in every browser this has to run in.
- *
- * No imports, no exports. A content script is a classic script, and a single
- * export makes tsc emit module syntax that fails to load with no diagnostic.
+ * ------------------------------------------------------------------
+ *  Title    |  In-page agent
+ *  Ref      |  connect, render (chooser), applyMark, shim relay
+ *  ID       |  M2 (content agent)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The ISOLATED-world content script for every managed
+ *           |  tab.
+ *  How      |  A long-lived port keeps the worker warm so a cold one
+ *           |  does not lose the child-tab bind race; the chooser
+ *           |  renders in a closed shadow root; the session mark is
+ *           |  applied; the storage shim's handshake is relayed.
+ *  Note     |  No imports or exports. A content script is a classic
+ *           |  script, and one export makes tsc emit module syntax
+ *           |  that fails to load with no diagnostic.
+ *  Author   |  Ojas Kekre, 24/08/2026
+ * ------------------------------------------------------------------
  */
 
 interface ChooserOption {
@@ -272,9 +270,12 @@ let beating: ReturnType<typeof setInterval> | null = null;
 let reapplies: number[] = [];
 let paintDisabled = false;
 /**
- * The site's own icon elements, detached rather than destroyed. Unbinding a tab
- * has to give the page back exactly what it had, and the same nodes are handed
- * back so a site holding a reference to its link element still holds a live one.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The site's own icon elements, detached not destroyed.
+ *  Note     |  Unbinding gives the page back exactly what it had: the
+ *           |  same nodes, so a site holding a reference to its link
+ *           |  element still holds a live one.
+ * ------------------------------------------------------------------
  */
 const stash: HTMLLinkElement[] = [];
 /** The icons the page had, recorded where our own teardown cannot reach. */
@@ -285,9 +286,12 @@ const BEAT_MS = 4000;
 const STASH_CAP = 8;
 
 /**
- * A page can declare a thousand icon links, and each one the worker accepts is
- * a fetch it makes. Bounded here as well as in the worker, so the message stays
- * small even on a page built to make it enormous.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Cap on icon links reported to the worker.
+ *  Note     |  Each accepted link is a fetch the worker makes.
+ *           |  Bounded here as well as in the worker, so the message
+ *           |  stays small even on a page built to make it enormous.
+ * ------------------------------------------------------------------
  */
 const MAX_REPORTED_ICONS = 12;
 
@@ -321,14 +325,16 @@ function iconCandidates(): Array<{ href: string; type?: string; sizes?: string }
 }
 
 /**
- * Chrome resolves the tab icon from the link elements present, and its choice
- * among several is not something to rely on, so the site's own are removed
- * rather than merely outranked.
- *
- * Sites that rewrite their favicon at runtime, which is most of the ones worth
- * having sessions for, will put theirs back. Reapplying is correct, but a site
- * that reacts to our reapplication would loop, so the rate is capped and paint
- * gives up rather than spinning.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Paint the session mark as the tab's favicon.
+ *  How      |  Chrome's choice among several icon links is not
+ *           |  reliable, so the site's own are removed rather than
+ *           |  merely outranked.
+ *  Note     |  Sites that rewrite their favicon put theirs back, so
+ *           |  reapplying is correct; a site that reacts to it would
+ *           |  loop, so the rate is capped and paint gives up rather
+ *           |  than spinning.
+ * ------------------------------------------------------------------
  */
 function applyMark(dataUrl: string): void {
   if (paintDisabled || !document.head) return;
@@ -400,12 +406,13 @@ function applyMark(dataUrl: string): void {
 }
 
 /**
- * A pulse the page's own world can see.
- *
- * The watchdog cannot ask whether this extension is still installed: it has no
- * extension APIs, by definition, because it is page script. What it can see is
- * whether anything has stamped the document recently. This is that stamp, and
- * it stops the moment we do.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A pulse the page's own world can see.
+ *  How      |  The watchdog has no extension APIs, being page script,
+ *           |  so it cannot ask whether the extension is installed.
+ *           |  What it can see is whether the document was stamped
+ *           |  recently. This is that stamp, and it stops when we do.
+ * ------------------------------------------------------------------
  */
 function beat(): void {
   try {
@@ -507,13 +514,15 @@ button:focus-visible { outline: 2px solid var(--tone); outline-offset: 2px; }
 `;
 
 /**
- * A short note in the corner, for something that already happened.
- *
- * Distinct from the guard card on purpose. That one interrupts because it wants
- * a decision. This one only says what was done on the user's behalf, so it
- * asks for nothing, takes no focus, and leaves. Silence would be worse: a tab
- * quietly rejoining an account is exactly the kind of thing that has to be
- * visible, or the extension is deciding who you are without telling you.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A short note in the corner, for something that
+ *           |  already happened.
+ *  Note     |  Distinct from the guard card: that one interrupts for
+ *           |  a decision; this only says what was done on the user's
+ *           |  behalf, so it takes no focus and leaves. Silence would
+ *           |  be worse, a tab quietly rejoining an account has to be
+ *           |  visible.
+ * ------------------------------------------------------------------
  */
 const NOTE_SHEET = `
 :host { all: initial }
@@ -592,13 +601,15 @@ function clearGuard(): void {
 }
 
 /**
- * What the user sees when a session touches something with a blast radius.
- *
- * A warning fades, because warning on every destructive request and demanding
- * a click would be the fastest possible route to the feature being turned off.
- * A refusal does not: the request did not happen, the page is about to behave
- * as though it failed for no reason, and the user needs to know why and to have
- * a way past it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  What the user sees when a session touches something
+ *           |  with a blast radius.
+ *  Note     |  A warning fades: demanding a click on every
+ *           |  destructive request is the fastest route to the
+ *           |  feature being turned off. A refusal does not, the
+ *           |  request did not happen and the user needs to know why
+ *           |  and have a way past it.
+ * ------------------------------------------------------------------
  */
 function showGuard(notice: GuardNotice, allow: () => void): void {
   clearGuard();
@@ -669,33 +680,21 @@ function showGuard(notice: GuardNotice, allow: () => void): void {
 // --------------------------------------------------------------- storage
 
 /**
- * The bridge between the storage shim in the MAIN world and the worker.
- *
- * The shim installs before it can know which session it belongs to, because the
- * binding lives in the worker and takes a round trip. It parks in a pending
- * state and asks; this relays the question and the answer.
- *
- * The channel name was fixed rather than a nonce, and the argument for that was
- * half right, which is the interesting part.
- *
- * What it said: a page forging a commit could point the shim at another
- * session's namespace, but a page can already read every namespace on its own
- * origin through a same-origin about:blank frame, so the forgery grants nothing
- * it did not already have. That still holds, and the suite confirms the forgery
- * yields nothing.
- *
- * What it missed is the other direction. The channel did not only take
- * instructions, it published: the shim announced its session id in the detail
- * of an event with a fixed name, and that id is the same string on every origin
- * in that session. Any two sites could listen, compare notes, and link the same
- * person across everything they visited. That is not a smaller version of a leak
- * the page already had, it is the exact thing this product exists to prevent,
- * offered without the page having to do anything clever at all.
- *
- * So the traffic moved onto a per-document nonce the shim generates and
- * announces once, at document_start, before the page has a script to listen
- * with. A listener cannot be attached to an event that has already been
- * dispatched, and that is the whole argument.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The bridge between the MAIN-world storage shim and
+ *           |  the worker.
+ *  How      |  The shim installs before it knows its session (the
+ *           |  binding lives in the worker, a round trip away), parks
+ *           |  pending and asks; this relays the question and answer.
+ *  Note     |  The channel name was fixed, not a nonce. A forged
+ *           |  commit grants nothing (a page already reaches every
+ *           |  namespace via a same-origin about:blank frame), but
+ *           |  the fixed name also published the session id, the same
+ *           |  string on every origin, so two sites could link the
+ *           |  person. So traffic moved to a per-document nonce
+ *           |  announced once at document_start; a listener cannot
+ *           |  attach to an event already dispatched.
+ * ------------------------------------------------------------------
  */
 interface ShimState {
   sid: string | null;
@@ -708,9 +707,13 @@ interface ShimState {
 const ANNOUNCE = '__nvx.storage.ready';
 
 /**
- * Captured before any page script exists, for the same reason the shim captures
- * them: a page that replaced these later would otherwise see the nonce and every
- * message on it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The dispatch/listen primitives, captured before any
+ *           |  page script exists.
+ *  Note     |  Same reason the shim captures them: a page that
+ *           |  replaced these later would see the nonce and every
+ *           |  message on it.
+ * ------------------------------------------------------------------
  */
 const rawDispatch = EventTarget.prototype.dispatchEvent;
 const rawListen = EventTarget.prototype.addEventListener;
@@ -808,9 +811,12 @@ let onShimCookie: ((value: string, url: string) => void) | null = null;
 
 
 /**
- * The port exists to keep the worker warm. Chrome tears a service worker down
- * after roughly thirty seconds idle, and reconnecting on disconnect keeps the
- * link alive across the five minute port lifetime cap.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The port that keeps the worker warm.
+ *  How      |  Chrome tears a service worker down after ~30s idle,
+ *           |  and reconnecting on disconnect keeps the link alive
+ *           |  across the five minute port lifetime cap.
+ * ------------------------------------------------------------------
  */
 function connect(): void {
   let port: chrome.runtime.Port;
@@ -1006,10 +1012,14 @@ function connect(): void {
 }
 
 /**
- * The agent is registered for the hosts a session reaches, and separately
- * injected on demand for a tab the user asked to re-pick. Both can land on the
- * same page, and a second instance would open a second port, hold the worker
- * awake for as long as the tab lives, and render the chooser twice.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Guard against a second agent instance on one page.
+ *  Note     |  The agent is registered for a session's hosts and also
+ *           |  injected on demand for a re-pick, so both can land on
+ *           |  one page; a second instance would open a second port,
+ *           |  hold the worker awake for the tab's life, and render
+ *           |  the chooser twice.
+ * ------------------------------------------------------------------
  */
 const scope = globalThis as unknown as { __nvxAgent?: boolean };
 if (!scope.__nvxAgent) {
