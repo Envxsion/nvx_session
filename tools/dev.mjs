@@ -1,18 +1,19 @@
 /**
- * Launches a browser with the built extension loaded and leaves it running.
- *
- * Not the e2e harness: that creates throwaway sessions, proves things about
- * them and removes them again, which is the opposite of what you want when the
- * point is to look at it. This seeds enough state that every surface has
- * something in it, opens the panel, and gets out of the way.
- *
- * The profile is stable across runs, so sessions you make by hand survive a
- * relaunch. It is a scratch profile either way and never your real one.
- *
- *   node tools/dev.mjs            opera, dist/
- *   node tools/dev.mjs chrome     see the note below
- *   node tools/dev.mjs opera --mv2
- *   node tools/dev.mjs opera --bare      no seeding, just the extension
+ * ------------------------------------------------------------------
+ *  Title    |  Dev launcher
+ *  Ref      |  cdp.mjs, dist/, popup.html
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Launch a browser with the built extension and leave
+ *           |  it running.
+ *  How      |  Not the e2e harness. Seeds enough state that every
+ *           |  surface has something in it, opens the panel, and gets
+ *           |  out of the way. A scratch profile, stable across runs,
+ *           |  never your real one.
+ *  Note     |  node tools/dev.mjs [opera|chrome] [--mv2] [--bare];
+ *           |  --bare skips seeding.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';
@@ -53,15 +54,14 @@ const profile = join(tmpdir(), `nvx-dev-${mv2 ? 'mv2' : 'mv3'}`);
 mkdirSync(profile, { recursive: true });
 
 /**
- * The service worker script is cached by the profile, and relaunching with
- * --load-extension does not reliably invalidate it. A worker running yesterday's
- * bytes while the files on disk hold today's is the worst possible development
- * state: every diagnostic reads the new source, the behaviour is the old one,
- * and hours go into explaining a bug that was fixed already. Measured exactly
- * once, which was enough.
- *
- * Dropping the cache costs a few hundred milliseconds on start. Session state
- * lives elsewhere and is untouched.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Drop the profile's cached service worker script.
+ *  Note     |  Relaunching with --load-extension does not reliably
+ *           |  invalidate it. A worker running yesterday's bytes while
+ *           |  disk holds today's is the worst dev state: diagnostics
+ *           |  read the new source, behaviour is the old one. Dropping
+ *           |  it costs a few hundred ms; session state is untouched.
+ * ------------------------------------------------------------------
  */
 let cacheHeld = false;
 for (const dir of ['Service Worker', join('Default', 'Service Worker')]) {
@@ -78,9 +78,13 @@ for (const dir of ['Service Worker', join('Default', 'Service Worker')]) {
 }
 
 /**
- * A port somebody else is already listening on is somebody else's browser, and
- * connecting to it reads a different profile's extensions while the window you
- * are looking at has no endpoint at all. Take the first free one instead.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Take the first free debugging port instead of a fixed
+ *           |  one.
+ *  Note     |  A port already listened on is another browser, and
+ *           |  connecting to it reads a different profile's extensions
+ *           |  while the window you are looking at has no endpoint.
+ * ------------------------------------------------------------------
  */
 async function freePort(from) {
   for (let p = from; p < from + 20; p++) {
@@ -128,10 +132,13 @@ if (!fixtureUp) {
 }
 
 /**
- * Only --load-extension is used, never the CDP loadUnpacked the e2e harness
- * needs. Doing both loads the extension twice and leaves two service workers
- * under one id (§27 H1), which is confusing enough in a test run and would be
- * unusable in a browser somebody is clicking around in.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Only --load-extension is used, never the CDP
+ *           |  loadUnpacked the e2e harness needs.
+ *  Note     |  Doing both loads the extension twice and leaves two
+ *           |  service workers under one id (section 27 H1), unusable
+ *           |  in a browser somebody is clicking around in.
+ * ------------------------------------------------------------------
  */
 async function attach() {
   const v = await browserEndpoint(PORT, { tries: 80 });

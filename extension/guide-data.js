@@ -1,24 +1,18 @@
 /**
- * The guide, as data.
- *
- * One source, two presentations. The popup renders it as a stack of collapsible
- * chapters at 400 pixels; `guide.html` renders the same array full width with
- * the figures at full size. Writing it twice is how a tutorial comes to describe
- * a product that no longer exists, and a wrong guide is worse than none: it is a
- * confident answer.
- *
- * Every chapter answers three questions in the same order, because that is the
- * order somebody actually has them. What is this. Why would I care. What do I
- * press. Nothing here explains an implementation; if a sentence could only be
- * written by somebody who has read the source, it belongs in DESIGN.html.
- *
- * The figures are inline SVG. No external asset can load under the extension's
- * content security policy, and a diagram is worth more here than a screenshot,
- * which would go stale the first time a button moved.
- *
- * `LIMITS` at the bottom is not an appendix. Every one of those is something the
- * product cannot do, and a guide that lists only capabilities is the reason
- * people conclude a tool is broken when it is working exactly as designed.
+ * ------------------------------------------------------------------
+ *  Title    |  The guide, as data
+ *  Ref      |  guide.js, popup.js, GUIDE and LIMITS arrays
+ *  ID       |  M6 (popup UI)
+ * ------------------------------------------------------------------
+ *  Purpose  |  One source of guide content, two presentations.
+ *  How      |  The popup renders a collapsible stack at 400 pixels;
+ *           |  guide.html renders the same array full width. Every
+ *           |  chapter answers what is this, why care, what to press.
+ *  Note     |  Figures are inline SVG, since no external asset loads
+ *           |  under the CSP. LIMITS is not an appendix: listing only
+ *           |  capabilities is why people call a working tool broken.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 /* Figures. Drawn small and scaled by the container, so one definition serves
@@ -434,12 +428,13 @@ const GUIDE = [
 ];
 
 /**
- * What it does not do.
- *
- * Kept as its own list rather than scattered through the chapters, because
- * somebody deciding whether to trust this reads it in one go, and because a
- * guide listing only capabilities is why people conclude a tool is broken when
- * it is working exactly as designed.
+ * ------------------------------------------------------------------
+ *  Purpose  |  What it does not do.
+ *  Note     |  Its own list, not scattered through the chapters, so
+ *           |  somebody deciding whether to trust this reads it in one
+ *           |  go; a guide listing only capabilities is why people
+ *           |  call a working tool broken.
+ * ------------------------------------------------------------------
  */
 const LIMITS = [
   ['It is not anonymity', 'Sites still see your address, your browser and your screen. Two sessions are separate from each other, not hidden from the site.'],

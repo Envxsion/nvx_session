@@ -1,13 +1,18 @@
 /**
- * The toolbar popup.
- *
- * One question, asked mid-task: who am I on this tab, and can I be somebody
- * else. So the current tab is the hero, switching is one tap under it, and
- * anything that needs room stays in the full panel behind a link.
- *
- * It reads the same state payload the panel does rather than a summary of its
- * own, because two surfaces computing the same numbers separately is how they
- * come to disagree.
+ * ------------------------------------------------------------------
+ *  Title    |  Toolbar popup
+ *  Ref      |  panel.js, base.js, guide.js
+ *  ID       |  M6 (popup UI)
+ * ------------------------------------------------------------------
+ *  Purpose  |  One question, asked mid-task: who am I on this tab,
+ *           |  and can I be somebody else.
+ *  How      |  The current tab is the hero, switching is one tap
+ *           |  under it, and anything needing room stays in the full
+ *           |  panel behind a link.
+ *  Note     |  Reads the same state payload the panel does, not its
+ *           |  own summary, so the two cannot come to disagree.
+ *  Author   |  Ojas Kekre, 25/08/2026
+ * ------------------------------------------------------------------
  */
 
 /* $, send, el, hex and plural come from panel.js, which loads first. Defining
@@ -22,11 +27,13 @@ function hostOf(url) {
 }
 
 /**
- * A stable small number from a string, used to rotate a session's glyph.
- *
- * Not a hash for any security purpose: it only has to be stable across reloads
- * and spread ids around the circle, so the same session always draws the same
- * shape and two sessions rarely draw the same one.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A stable small number from a string, to rotate a
+ *           |  session's glyph.
+ *  Note     |  Not a hash for security: only stable across reloads
+ *           |  and spread around the circle, so a session always
+ *           |  draws the same shape and two rarely collide.
+ * ------------------------------------------------------------------
  */
 function spin(id) {
   let n = 0;
@@ -37,11 +44,12 @@ function spin(id) {
 // ---------------------------------------------------------------- the mark
 
 /**
- * The product mark: an aperture that does not close.
- *
- * Three arcs around a common centre with a gap in each, rotated apart. It is
- * the one idea the whole thing rests on, drawn: concentric, sharing a centre,
- * never touching.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The product mark: an aperture that does not close.
+ *  How      |  Three arcs around a common centre, each with a gap,
+ *           |  rotated apart: concentric, sharing a centre, never
+ *           |  touching. The one idea the whole thing rests on.
+ * ------------------------------------------------------------------
  */
 function drawMark(node) {
   const ns = 'http://www.w3.org/2000/svg';
@@ -76,9 +84,12 @@ function drawMark(node) {
 }
 
 /**
- * A session's own glyph: one ring with a gap, turned by its id.
- *
- * Shape as well as colour, because colour alone is not a channel everybody has.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A session's own glyph: one ring with a gap, turned
+ *           |  by its id.
+ *  Note     |  Shape as well as colour, since colour alone is not a
+ *           |  channel everybody has.
+ * ------------------------------------------------------------------
  */
 function drawGlyph(node, session, size = 34) {
   const ns = 'http://www.w3.org/2000/svg';
@@ -403,64 +414,58 @@ function paintSwitch() {
 }
 
 /**
- * The alarm, as opposed to the reading beside it.
- *
- * The health strip below has said "isolation: 2 leaks" for a while now, and
- * that is not an alarm: it is a number on a surface nobody has open. A leak
- * means the profile jar reached a tab that is supposed to be somebody else,
- * which is the one failure this whole thing exists to prevent, so it takes the
- * top of the view, says which session, and offers the two things worth doing
- * about it rather than leaving the user to work them out.
- *
- * It clears itself when the count goes back to zero, and the toolbar icon
- * carries the same state so a popup nobody opens is no longer the only place
- * it is visible.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The alarm, as opposed to the reading beside it.
+ *  How      |  A leak means the profile jar reached a tab meant to
+ *           |  be somebody else, the one failure this exists to
+ *           |  prevent, so it takes the top of the view, names the
+ *           |  session, and offers the two things worth doing.
+ *  Note     |  Clears itself at zero; the toolbar icon carries the
+ *           |  same state, so a popup nobody opens is not the only
+ *           |  place it shows.
+ * ------------------------------------------------------------------
  */
 /**
- * A sign-in this extension stopped fighting.
- *
- * Above the leak card, because it describes something that already happened to
- * the page in front of the user rather than a counter they can investigate
- * later, and because the action on it is the one they will want within seconds
- * of reading it.
- *
- * The tone is deliberately neither an apology nor an alarm. Something went
- * wrong, the extension noticed and got out of the way, the site works again,
- * and here is how to undo that if it was wrong. Every one of those is good news
- * except the first.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A sign-in this extension stopped fighting.
+ *  How      |  Above the leak card: it describes something that
+ *           |  already happened to the page, and its action is the
+ *           |  one wanted within seconds of reading it.
+ *  Note     |  Tone is neither apology nor alarm. Something went
+ *           |  wrong, the extension got out of the way, the site
+ *           |  works again, and here is how to undo it.
+ * ------------------------------------------------------------------
  */
 /**
- * Says, on the first thing anybody sees, that nothing is being isolated.
- *
- * A paused extension that looks like a running one is the worst state this can
- * be in: every promise it makes is off, and the only place that said so was a
- * button in Settings that somebody pressed once and forgot. Worse than a
- * feature being broken, because a broken feature eventually announces itself
- * and this would not.
- *
- * Also the way back. Somebody who paused to test whether this was the cause of
- * something needs one press to undo it, from wherever they happen to be.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Says, on the first thing anybody sees, that nothing
+ *           |  is being isolated.
+ *  Note     |  A paused extension that looks like a running one is
+ *           |  the worst state: every promise is off, and the only
+ *           |  sign was a button in Settings pressed once and
+ *           |  forgot. Also the way back, one press from anywhere.
+ * ------------------------------------------------------------------
  */
 /**
- * The one-time telemetry question.
- *
- * Opt-in, so it asks rather than assumes, and it asks once: the card shows only
- * in a build that can actually send (an endpoint was configured) and only until
- * the question has been answered either way. Both buttons record an answer, so
- * "No thanks" is a real decision that is remembered, not a dismissal that lets
- * the card come back. The honest sell is the small print: what it can never
- * contain matters more here than what it can.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The one-time telemetry question.
+ *  How      |  Opt-in: shows only in a build that can send and only
+ *           |  until answered either way. Both buttons record an
+ *           |  answer, so "No thanks" is remembered, not dismissed.
+ *  Note     |  The honest sell is the small print: what it can never
+ *           |  contain matters more than what it can.
+ * ------------------------------------------------------------------
  */
 /**
- * The one caution worth meeting before it meets you.
- *
- * Signing into a federated login inside an isolated session hands the provider a
- * partial set of its cookies, which it can read as a stolen session and answer
- * by signing the account out or looping. The extension stops the loop and the
- * account is safe, but a redirect loop with no explanation reads as the site
- * being broken, so this says it once, plainly, on the home view. Acknowledging
- * records a persistent flag, the same shape as the consent card, so it is shown
- * once and never returns. The guide carries the long version.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The one caution worth meeting before it meets you.
+ *  How      |  A federated login in an isolated session hands the
+ *           |  provider a partial set of cookies, read as a stolen
+ *           |  session, so it loops or signs out. This says it once
+ *           |  on the home view; acknowledging records a flag so it
+ *           |  never returns. The guide has the long version.
+ *  Note     |  The extension stops the loop and the account is safe.
+ * ------------------------------------------------------------------
  */
 function paintCaution() {
   const node = $('caution');
@@ -553,12 +558,14 @@ function paintConsent() {
 }
 
 /**
- * The undo for a move made with the popup closed.
- *
- * A right-click or keyboard move happens where a toast cannot follow, so the
- * worker remembers the one most recent such move and the popup offers it here
- * the next time it opens. Undo puts the tab back; Keep it stops offering,
- * because a card that will not go away is worse than the convenience it adds.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The undo for a move made with the popup closed.
+ *  How      |  A right-click or keyboard move happens where a toast
+ *           |  cannot follow, so the worker remembers the one most
+ *           |  recent move and the popup offers it on next open.
+ *  Note     |  Undo puts the tab back; Keep it stops offering, since
+ *           |  a card that will not leave is worse than its use.
+ * ------------------------------------------------------------------
  */
 function paintMoved() {
   const node = $('moved');
@@ -739,14 +746,16 @@ function paintLeak() {
 }
 
 /**
- * Three readings, coloured only when something is wrong.
- *
- * The desync number is the one that has to be handled carefully. It counts
- * three different things, and only one of them is a fault: foreign means the
- * profile jar reached a managed tab, which is the failure the whole design
- * exists to prevent. stale means a cookie rotated mid-flight, which happens
- * once per hop of every normal sign-in. Showing the total taught the last
- * reader to diagnose a loop that was not there, so the total is not shown.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Three readings, coloured only when something is
+ *           |  wrong.
+ *  Note     |  Desync counts three things; only foreign is a fault
+ *           |  (profile jar reached a managed tab). stale is a
+ *           |  cookie rotated mid-flight, once per hop of a normal
+ *           |  sign-in.
+ *  Bug-Fix  |  Showing the total taught the last reader to diagnose
+ *           |  a loop that was not there, so the total is not shown.
+ * ------------------------------------------------------------------
  */
 function paintHealth() {
   const node = $('health');
@@ -796,13 +805,14 @@ function paintHealth() {
 // ------------------------------------------------------------------ views
 
 /**
- * One view at a time, and the popup takes the width the view needs.
- *
- * Not a router in any real sense: there are a handful of destinations and no
- * history worth keeping, so it is a class on the body and a hidden attribute on
- * each view. The width lives in CSS per view rather than being computed here,
- * because the browser sizes the popup from the document and animating that one
- * property animates the popup itself.
+ * ------------------------------------------------------------------
+ *  Purpose  |  One view at a time, and the popup takes the width
+ *           |  the view needs.
+ *  How      |  Not really a router: a class on the body and a hidden
+ *           |  attribute per view. Width lives in CSS per view, since
+ *           |  the browser sizes the popup from the document and
+ *           |  animating that property animates the popup.
+ * ------------------------------------------------------------------
  */
 function go(view) {
   document.body.dataset.view = view;
@@ -834,13 +844,13 @@ function go(view) {
 }
 
 /**
- * Whether there is more below, which is the only thing that makes a cut-off
- * list read as a list rather than as everything there is.
- *
- * The alternative considered was a scroll-driven CSS mask, which needs no
- * script at all but cannot tell the difference between a view that fits and a
- * view scrolled to its end, so it fades content that is genuinely the last
- * thing.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether there is more below, the only thing that
+ *           |  makes a cut-off list read as a list.
+ *  Note     |  A scroll-driven CSS mask needs no script but cannot
+ *           |  tell a view that fits from one scrolled to its end,
+ *           |  so it fades content that is genuinely the last thing.
+ * ------------------------------------------------------------------
  */
 function measureScroll() {
   const s = $('stage');
@@ -852,16 +862,15 @@ function measureScroll() {
 $('stage').addEventListener('scroll', measureScroll, { passive: true });
 
 /**
- * Measured when anything actually changes size, rather than on a frame after a
- * view swap and on window resize.
- *
- * The old pair missed most of what matters here. A popup is sized by the
- * browser from the document, so the window resize that follows a view change
- * arrives after the frame the swap scheduled a measurement on, and there is no
- * window resize at all when a list simply gets longer. What was left was a
- * scroller that scrolled with no rail and no fade, which is a list nobody
- * discovers continues: the exact failure this function exists to prevent, in
- * the case it was written for.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Measure when anything actually changes size, not on
+ *           |  a frame after a view swap and on window resize.
+ *  Bug-Fix  |  The old pair missed most of it: a window resize after
+ *           |  a view change arrives after the swap's scheduled
+ *           |  frame, and there is no resize at all when a list just
+ *           |  grows, leaving a scroller with no rail and no fade,
+ *           |  a list nobody discovers continues.
+ * ------------------------------------------------------------------
  */
 if (typeof ResizeObserver === 'function') {
   const watch = new ResizeObserver(() => measureScroll());
@@ -870,10 +879,14 @@ if (typeof ResizeObserver === 'function') {
 }
 
 /**
- * A count on a nav destination, so something that arrived while you were
- * elsewhere is visible without visiting every view. Only counts that mean
- * "somebody should look at this" qualify: a third party that was handed
- * cookies, and a blast radius entry that was refused.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A count on a nav destination, so something that
+ *           |  arrived while you were elsewhere shows without
+ *           |  visiting every view.
+ *  Note     |  Only "somebody should look" counts qualify: a third
+ *           |  party handed cookies, and a refused blast radius
+ *           |  entry.
+ * ------------------------------------------------------------------
  */
 function paintNavCounts() {
   let sent = 0;
@@ -909,9 +922,13 @@ addEventListener('keydown', (e) => {
 });
 
 /**
- * A sheet needs the full width whichever view opened it, and nothing else in
- * here changes the body class, so watching for it is cheaper and more reliable
- * than threading a callback through the panel's own sheet helpers.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A sheet needs the full width whichever view opened
+ *           |  it.
+ *  How      |  Nothing else here changes the body class, so watching
+ *           |  for it beats threading a callback through the panel's
+ *           |  own sheet helpers.
+ * ------------------------------------------------------------------
  */
 new MutationObserver(() => {
   const open = [...document.querySelectorAll('.sheet')].some((n) => !n.hidden);
@@ -921,9 +938,12 @@ new MutationObserver(() => {
 // ----------------------------------------------------------------- actions
 
 /**
- * The one surface that stayed a page. Every suite behind it opens tabs, and a
- * popup closes the moment it loses focus, so a run would destroy the surface
- * reporting on it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The one surface that stayed a page.
+ *  Note     |  Every suite behind it opens tabs, and a popup closes
+ *           |  the moment it loses focus, so a run would destroy the
+ *           |  surface reporting on it.
+ * ------------------------------------------------------------------
  */
 document.querySelector('.diag-link')?.addEventListener('click', () => {
   void chrome.tabs.create({ url: chrome.runtime.getURL('diagnostics.html') });
@@ -933,11 +953,12 @@ document.querySelector('.diag-link')?.addEventListener('click', () => {
 // ---------------------------------------------------------------- journal
 
 /**
- * What the extension did, read back.
- *
- * Newest first, because the question is almost always "what just happened".
- * The worker reverses on the way out rather than storing in that order, so the
- * exported file still reads top to bottom like a log file should.
+ * ------------------------------------------------------------------
+ *  Purpose  |  What the extension did, read back.
+ *  How      |  Newest first: the question is almost always "what
+ *           |  just happened". The worker reverses on the way out,
+ *           |  so the exported file still reads top to bottom.
+ * ------------------------------------------------------------------
  */
 const LOG_LEVELS = [
   ['debug', 'Everything', 'Every decision plus the routine traffic. What a bug report wants.'],
@@ -1036,13 +1057,14 @@ $('journal-refresh')?.addEventListener('click', () =>
 );
 
 /**
- * Writes the whole journal out as a file.
- *
- * The blob is built here rather than in the worker, and the anchor click is why:
- * a service worker cannot save a file, and asking for the downloads permission
- * to write one text file is a worse trade than letting the page that asked make
- * the blob itself. The object url is revoked on the next turn, because a popup
- * can be closed before the browser has read it if it is revoked immediately.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Writes the whole journal out as a file.
+ *  How      |  The blob is built here, not in the worker: a service
+ *           |  worker cannot save a file, and the downloads
+ *           |  permission for one text file is a worse trade.
+ *  Note     |  The object url is revoked on the next turn; revoked
+ *           |  at once, a closing popup may not have read it yet.
+ * ------------------------------------------------------------------
  */
 $('journal-export')?.addEventListener('click', () =>
   busy($('journal-export'), 'Writing', async () => {
@@ -1062,8 +1084,11 @@ $('journal-export')?.addEventListener('click', () =>
 );
 
 /**
- * Arms before it acts, the same as deleting a session, and for the same reason:
- * the journal is the only record of what happened and there is no undo.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Arms before it acts, the same as deleting a session.
+ *  Note     |  The journal is the only record of what happened and
+ *           |  there is no undo.
+ * ------------------------------------------------------------------
  */
 let journalArmed = null;
 $('journal-clear')?.addEventListener('click', async () => {
@@ -1088,14 +1113,15 @@ $('journal-clear')?.addEventListener('click', async () => {
 });
 
 /**
- * Back to the setup screen, which opens itself once and then never again.
- *
- * Two adoption surfaces, and they are not the same job. The sheet beside this
- * makes one session out of a hand-picked set of domains, with a name and a
- * colour chosen there. The setup screen reads the whole profile and proposes
- * one session per account it can recognise. Somebody who skipped it on the
- * first run, or who has signed into three new things since, wants the second
- * one and had no way back to it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Back to the setup screen, which opens itself once
+ *           |  and then never again.
+ *  Note     |  Two adoption surfaces, different jobs. The sheet
+ *           |  makes one session from hand-picked domains; the setup
+ *           |  screen reads the whole profile and proposes one
+ *           |  session per account. Somebody who skipped it wanted
+ *           |  the second and had no way back.
+ * ------------------------------------------------------------------
  */
 $('setup-again')?.addEventListener('click', () => {
   void send({ cmd: 'openWelcome' });
@@ -1110,24 +1136,25 @@ $('guide-full')?.addEventListener('click', () => {
 // ------------------------------------------------------------------- start
 
 /**
- * panel.js paints on its own as soon as it has state. This adds the home view,
- * which is the only thing it does not know about, and re-runs after any action
- * that could have changed which session this tab is in.
+ * ------------------------------------------------------------------
+ *  Purpose  |  panel.js paints on its own once it has state; this
+ *           |  adds the home view it does not know about.
+ *  How      |  Re-runs after any action that could have changed
+ *           |  which session this tab is in.
+ * ------------------------------------------------------------------
  */
 /**
- * Everything the home view draws, as one string.
- *
- * The popup polls the worker because state changes underneath it: a tab
- * rebinds, a leak is counted, a third party is seen. Repainting on every poll
- * meant tearing down and rebuilding the whole view every 1500 milliseconds, and
- * the rows carry a staggered entrance animation, so the list went to nothing and
- * faded back in twice a second whether or not anything had happened. It also
- * threw away the scroll position and any keyboard focus in it.
- *
- * So the paint is skipped when the answer would be identical. Everything below
- * is read by one of the four painters; a field missing here is a field whose
- * change would not reach the screen, which is the failure mode to watch for when
- * adding one.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Everything the home view draws, as one string, so a
+ *           |  paint is skipped when the answer would be identical.
+ *  Bug-Fix  |  The popup polls, and repainting every poll rebuilt
+ *           |  the whole view every 1500 ms; the staggered entrance
+ *           |  made the list fade out and back twice a second and
+ *           |  threw away scroll position and focus.
+ *  Note     |  Every field below is read by one of the four
+ *           |  painters; a field missing here is a change that would
+ *           |  not reach the screen.
+ * ------------------------------------------------------------------
  */
 function homeState() {
   return JSON.stringify([

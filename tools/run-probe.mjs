@@ -1,19 +1,19 @@
 /**
- * Unattended probe runner.
- *
- * Launches a Chromium browser into a throwaway profile, side-loads the
- * capability probe, opens its panel and drives it over CDP. The real profile
- * is never touched: every run gets its own --user-data-dir under temp.
- *
- * Driving the panel rather than waiting for the probe to phone home is
- * deliberate. An MV3 service worker is lazy: it does not start until an event
- * wakes it, so a background task that only runs on a timer may never run at
- * all. Messaging it from an extension page is a guaranteed wake, and it
- * exercises the same path a human clicking the button would.
- *
- *   node tools/run-probe.mjs chrome
- *   node tools/run-probe.mjs opera
- *   node tools/run-probe.mjs opera --mv2
+ * ------------------------------------------------------------------
+ *  Title    |  Probe runner
+ *  Ref      |  cdp.mjs, probes/capability, diagnostics.html
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Launches Chromium into a throwaway profile, side-loads
+ *           |  the capability probe, opens its panel and drives it
+ *           |  over CDP.
+ *  How      |  Drives the panel rather than waiting for the probe to
+ *           |  phone home: an MV3 worker is lazy, so messaging it from
+ *           |  a page is a guaranteed wake.
+ *  Note     |  The real profile is never touched; every run gets its
+ *           |  own --user-data-dir under temp.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';
@@ -66,11 +66,15 @@ const profile = mkdtempSync(join(tmpdir(), 'nvx-profile-'));
 const PORT = 9223 + Math.floor(Math.random() * 400);
 
 /**
- * A fresh profile has developer mode off, and Chrome then loads an unpacked
- * extension but leaves it disabled: it gets an id, and its pages answer
- * ERR_BLOCKED_BY_CLIENT. Writing Preferences before first launch does not
- * survive, because Chrome rewrites the file with its own schema on startup.
- * So the profile is minted by a throwaway launch, patched, and reused.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Mint the profile by a throwaway launch, patch it, and
+ *           |  reuse it.
+ *  Note     |  A fresh profile has developer mode off, so an unpacked
+ *           |  extension loads disabled: it gets an id but its pages
+ *           |  answer ERR_BLOCKED_BY_CLIENT. Writing Preferences
+ *           |  before first launch does not survive, Chrome rewrites
+ *           |  the file on startup.
+ * ------------------------------------------------------------------
  */
 const prefsPath = join(profile, 'Default', 'Preferences');
 

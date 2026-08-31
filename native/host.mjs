@@ -1,22 +1,23 @@
 /**
- * The NVX native host.
- *
- * Spawned on demand by the browser over native messaging, answers a small set
- * of requests, and exits when the browser closes the pipe. The extension
- * feature-detects it and degrades silently when it is absent, so every build
- * is fully functional without it.
- *
- * What it exists for, in v1: holding the vault master key in the operating
- * system's own credential store instead of asking for a passphrase every time
- * the browser restarts. Everything else in section 18, side profile launch and
- * per-session proxying, needs process spawning and is deliberately not here
- * yet.
- *
- * Written in Node rather than Rust, which the design called for. Node is
- * already the project's toolchain and the protocol is identical either way;
- * what a Rust build would buy is a single signed binary with no runtime
- * dependency, which is a distribution problem rather than a protocol one. See
- * `npm run native:package`.
+ * ------------------------------------------------------------------
+ *  Title    |  NVX native host
+ *  Ref      |  protocol.mjs, DPAPI key store
+ *  ID       |  native host
+ * ------------------------------------------------------------------
+ *  Purpose  |  Answer a small set of requests over native messaging,
+ *           |  spawned on demand by the browser.
+ *  How      |  Exits when the browser closes the pipe. The extension
+ *           |  feature-detects it and degrades silently, so every
+ *           |  build is fully functional without it.
+ *  Note     |  v1 holds the vault master key in the OS credential
+ *           |  store instead of a passphrase every restart. Process
+ *           |  spawning (side profile launch, per-session proxy) is
+ *           |  not here yet. Node rather than Rust; a Rust build would
+ *           |  buy one signed binary with no runtime dependency, a
+ *           |  distribution problem not a protocol one. See npm run
+ *           |  native:package.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { PROTOCOL_VERSION, FrameReader, encode } from './protocol.mjs';
@@ -32,9 +33,13 @@ const run = promisify(execFile);
 const HOST_VERSION = '0.1.0';
 
 /**
- * Idle exit. The browser keeps the pipe open for as long as the port lives, so
- * this only fires if the extension goes away without closing it, which is what
- * a crashed renderer looks like.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Idle exit.
+ *  Note     |  The browser holds the pipe open as long as the port
+ *           |  lives, so this only fires if the extension goes away
+ *           |  without closing it, which is what a crashed renderer
+ *           |  looks like.
+ * ------------------------------------------------------------------
  */
 const IDLE_MS = 5 * 60 * 1000;
 let idleTimer = null;
@@ -51,12 +56,15 @@ function send(message) {
 // --------------------------------------------------------------- key store
 
 /**
- * The master key, wrapped by the OS so it is bound to this user account.
- *
- * On Windows that is DPAPI via PowerShell, which needs no native module and no
- * compilation step. The wrapped blob is what gets written to disk; the
- * unwrapped key never touches it. A different user, or a copy of the file on
- * another machine, cannot unwrap it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The master key, wrapped by the OS so it is bound to
+ *           |  this user account.
+ *  How      |  On Windows, DPAPI via PowerShell: no native module, no
+ *           |  compile step. The wrapped blob is written to disk; the
+ *           |  unwrapped key never touches it.
+ *  Note     |  A different user, or a copy of the file on another
+ *           |  machine, cannot unwrap it.
+ * ------------------------------------------------------------------
  */
 const SERVICE = 'NVX Session';
 
@@ -86,16 +94,18 @@ function isBase64(s) {
 }
 
 /**
- * The wrapped blobs live on disk, which is the entire point.
- *
- * An in-memory store would be forgotten the moment the browser closes the pipe,
- * so the passphrase prompt this replaces would simply come back. What is
- * written is the DPAPI ciphertext: bound to this user on this machine, useless
- * to anyone who copies the file.
- *
- * Permissions are tightened on creation rather than trusted from the parent
- * directory, because %LOCALAPPDATA% is readable by anything running as this
- * user and the wrapped blob is the one artefact worth stealing.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The wrapped blobs live on disk, which is the point.
+ *  How      |  An in-memory store would be forgotten when the pipe
+ *           |  closes, bringing back the passphrase prompt this
+ *           |  replaces. What is written is DPAPI ciphertext: bound to
+ *           |  this user on this machine, useless to anyone who copies
+ *           |  the file.
+ *  Note     |  Permissions are tightened on creation, not trusted from
+ *           |  the parent dir: %LOCALAPPDATA% is readable by anything
+ *           |  running as this user, and the wrapped blob is the one
+ *           |  artefact worth stealing.
+ * ------------------------------------------------------------------
  */
 const STORE_DIR = join(
   process.env.LOCALAPPDATA || process.env.XDG_DATA_HOME || homedir(),

@@ -1,13 +1,19 @@
 /**
- * The held tab.
- *
- * A tab heading somewhere more than one session covers is sent here before the
- * site is contacted at all. That is the whole point: on a federated site the
- * question cannot be asked over the top of the page, because the page redirects
- * to its identity provider inside a second and takes the question with it, and
- * whatever jar the tab was holding while it waited is the account the sign-in
- * completes as. Holding the navigation instead means nothing is requested, no
- * cookie is set anywhere, and the answer arrives before the first byte does.
+ * ------------------------------------------------------------------
+ *  Title    |  The held tab
+ *  Ref      |  chooser.html, pick / pickerOptions messages
+ *  ID       |  M6 (popup UI)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Ask which session a tab belongs to before the site is
+ *           |  contacted at all.
+ *  How      |  Holding the navigation means nothing is requested and
+ *           |  no cookie is set, so the answer arrives before the
+ *           |  first byte does.
+ *  Note     |  A federated site redirects to its identity provider in
+ *           |  a second and takes an over-the-page question with it,
+ *           |  completing sign-in as whatever jar the tab held.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 const $ = (id) => document.getElementById(id);
@@ -51,8 +57,11 @@ function paintDestination() {
 }
 
 /**
- * Leaves before the browser navigates, so the page does not sit there looking
- * inert while the request goes out. Purely cosmetic; the answer is already sent.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Leave before the browser navigates, so the page does
+ *           |  not sit there looking inert while the request goes out.
+ *  Note     |  Purely cosmetic; the answer is already sent.
+ * ------------------------------------------------------------------
  */
 function leave() {
   $('card').classList.add('going');

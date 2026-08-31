@@ -1,12 +1,16 @@
 /**
- * NVX fixture origin.
- *
- * A deterministic, offline test origin for the capability probes and, later,
- * the M1 isolation suite. Nothing here depends on the network, so probe
- * results are reproducible and comparable between Chrome and Opera GX.
- *
- *   node tools/fixture/server.mjs
- *   http://localhost:8787
+ * ------------------------------------------------------------------
+ *  Title    |  NVX fixture origin
+ *  Ref      |  probes/capability, run-probe.mjs
+ *  ID       |  fixture
+ * ------------------------------------------------------------------
+ *  Purpose  |  A deterministic, offline test origin for the
+ *           |  capability probes and, later, the M1 isolation suite.
+ *  Note     |  Nothing depends on the network, so probe results are
+ *           |  reproducible and comparable between Chrome and Opera
+ *           |  GX.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { createServer } from 'node:http';
@@ -45,9 +49,12 @@ const json = (res, obj, extra) =>
   send(res, 200, 'application/json', JSON.stringify(obj, null, 2), extra);
 
 /**
- * Cookie fixtures spanning the attribute space the jar in DESIGN.html §08 has
- * to reproduce. Each probe run rotates the value so a stale cookie can never
- * be mistaken for a fresh one.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Cookie fixtures spanning the attribute space the jar
+ *           |  in DESIGN.html section 08 has to reproduce.
+ *  Note     |  Each run rotates the value so a stale cookie can never
+ *           |  be mistaken for a fresh one.
+ * ------------------------------------------------------------------
  */
 function cookieSet(stamp) {
   return [
@@ -964,10 +971,12 @@ const server = createServer((req, res) => {
 });
 
 /**
- * A port already in use is usually a fixture that is already running, which is
- * a fine state to be in and not worth a stack trace. Anything else on the port
- * is worth knowing about, so the two are distinguished rather than lumped
- * together.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A port in use is usually a fixture already running,
+ *           |  which is fine and not worth a stack trace.
+ *  Note     |  Anything else on the port is worth knowing about, so
+ *           |  the two are distinguished rather than lumped together.
+ * ------------------------------------------------------------------
  */
 server.on('error', async (err) => {
   if (err.code !== 'EADDRINUSE') throw err;

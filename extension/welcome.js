@@ -1,28 +1,19 @@
 /**
- * The setup screen, shown once, on the first run.
- *
- * The problem it exists for: this extension installed onto a browser somebody
- * has used for years does nothing visible. Every tab is unmanaged, every account
- * is still in the shared jar, and the one screen that would change that is
- * behind a toolbar button and a dialog nobody has a reason to open. Measured
- * against the only thing that matters, whether the person ends up isolated, an
- * extension that waits to be found has already failed.
- *
- * So this reads the profile, works out which of it looks like a real signed-in
- * account, groups the sites that belong to one account together, and offers the
- * whole thing as a single press.
- *
- * Three rules shape every decision here.
- *
- * Nothing is done before the button. The screen is a proposal, and the profile
- * is untouched until somebody presses something.
- *
- * Nothing is destroyed by the button either. Adoption copies, so the browser's
- * own jar is exactly as it was afterwards and undoing this is deleting a session.
- *
- * And it must be skippable without guilt. A first run screen that reads as a
- * demand is one people close and resent. "Not now" is a real answer and it is
- * offered as plainly as the other one.
+ * ------------------------------------------------------------------
+ *  Title    |  The setup screen
+ *  Ref      |  adoptScan / adopt messages, popup setup-again
+ *  ID       |  M6 (popup UI)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Offer profile adoption as a single press on first run.
+ *  How      |  Reads the profile, works out which of it is a real
+ *           |  signed-in account, groups the sites of one account, and
+ *           |  proposes one session per account.
+ *  Note     |  Three rules: nothing done before the button; adoption
+ *           |  copies, so the profile jar is untouched and undo is
+ *           |  deleting a session; skippable without guilt, "Not now"
+ *           |  is a real answer.
+ *  Author   |  Ojas Kekre, 19/08/2026
+ * ------------------------------------------------------------------
  */
 
 /* $, send, el, plural, COLORS and hex come from base.js. */
@@ -35,17 +26,17 @@ let scanned = null;
 const fmt = (n) => n.toLocaleString();
 
 /**
- * The colour a group will get, decided once and read by both the dot beside it
- * and the session that is created from it.
- *
- * Two places computing this separately is the drift `tests/ramp.test.ts` exists
- * to prevent one level down, and the first version had it: the dot took the
- * group's index in the whole list and the session took its index among the
- * ticked ones, so the swatch somebody saw was not the colour they got as soon
- * as they unticked anything above it.
- *
- * Keyed on position in the full list rather than on the selection, so a colour
- * does not move under somebody as they tick and untick.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The colour a group will get, decided once and read by
+ *           |  both the dot beside it and the session made from it.
+ *  How      |  Keyed on position in the full list, not the selection,
+ *           |  so a colour does not move as somebody ticks and unticks.
+ *  Bug-Fix  |  First version had the dot take its index in the whole
+ *           |  list and the session its index among the ticked ones,
+ *           |  so the swatch shown was not the colour you got once you
+ *           |  unticked anything above it. tests/ramp.test.ts guards
+ *           |  the same drift one level down.
+ * ------------------------------------------------------------------
  */
 function colorFor(group) {
   const at = groups.indexOf(group);
@@ -225,12 +216,14 @@ async function scan() {
 }
 
 /**
- * Creates the sessions, one at a time, reporting each.
- *
- * Sequential rather than in parallel, and it matters: each adoption compiles a
- * rule set and re-registers the page scripts, so firing eight at once means
- * eight registrations racing each other for the same slot table. Slower and
- * correct beats faster and occasionally short of a session.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Create the sessions, one at a time, reporting each.
+ *  How      |  Sequential, not parallel: each adoption compiles a rule
+ *           |  set and re-registers the page scripts, so firing eight
+ *           |  at once races eight registrations for one slot table.
+ *  Note     |  Slower and correct beats faster and occasionally short
+ *           |  of a session.
+ * ------------------------------------------------------------------
  */
 async function run() {
   const chosen = groups.filter((g) => selected.has(g.key));
@@ -300,11 +293,14 @@ function paintDone(results) {
 }
 
 /**
- * Everything you have open, which is the selection this screen is really for.
- *
- * Somebody installing this has tabs open and a reason they wanted it, and the
- * reason is in those tabs. Offering the whole jar first answers a question
- * nobody asked; offering what is on screen answers the one they have.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Select everything you have open, the selection this
+ *           |  screen is really for.
+ *  Note     |  Somebody installing this has tabs open for a reason,
+ *           |  and the reason is in those tabs. Offering the whole jar
+ *           |  answers a question nobody asked; what is on screen
+ *           |  answers the one they have.
+ * ------------------------------------------------------------------
  */
 $('pick-open')?.addEventListener('click', () => {
   selected = new Set(groups.filter((g) => g.open && g.signedIn && g.fits).map((g) => g.key));

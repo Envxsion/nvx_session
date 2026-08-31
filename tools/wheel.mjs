@@ -1,23 +1,20 @@
 /**
- * Does a wheel over the list actually scroll the view.
- *
- * Separate from every other probe because it has to arrive as input rather than
- * as an assignment. `scrollTop = 120` moves whichever element you name and says
- * nothing about which element the browser would have chosen; a wheel has to be
- * routed, and routing is what was broken. Driven through Input.dispatchMouseEvent
- * so the browser does that routing itself.
- *
- * It exists because a reported bug survived a passing suite. Every list in the
- * popup carried the shared `[data-scrollable]` token, which grants both
- * `overflow-y: auto` and `overscroll-behavior: contain`, while sitting inside a
- * stage that carried the same token. Each list was therefore a scroll container
- * nested in one that had been told not to chain: the inner had nothing to
- * scroll, the outer never heard about it, and the view sat still under a wheel
- * while the scrollbar rail worked perfectly. Assignment moves whichever element
- * you name, so nothing that scrolled by assignment could ever see it.
- *
- *   node tools/fixture/server.mjs
- *   node tools/wheel.mjs
+ * ------------------------------------------------------------------
+ *  Title    |  Wheel scroll probe
+ *  Ref      |  fixture/server.mjs, Input.dispatchMouseEvent
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether a wheel over a list actually scrolls the view.
+ *  How      |  Driven through Input.dispatchMouseEvent so the browser
+ *           |  routes the wheel itself, unlike a scrollTop assignment
+ *           |  that moves whichever element you name.
+ *  Bug-Fix  |  A reported bug survived a passing suite. Each list
+ *           |  carried [data-scrollable] (overflow-y auto plus
+ *           |  overscroll-behavior contain) inside a stage with the
+ *           |  same token, so the inner had nothing to scroll and the
+ *           |  outer never heard about it. Assignment could not see it.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';

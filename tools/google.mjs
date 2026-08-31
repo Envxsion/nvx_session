@@ -1,37 +1,19 @@
 /**
- * What Google's multi-login state actually looks like, and whether it can be
- * reordered without signing out.
- *
- * The question this answers: `authuser=0` is the default account, the index
- * comes from an ordered list, and the received wisdom is that the only way to
- * change the order is to sign out of everything and sign back in with the one
- * you want first. Is that true, or is it just that nobody exposed the mutation?
- *
- * TWO STAGES, AND THEY ARE NOT THE SAME RISK.
- *
- * Stage one is read only. It fetches the account list Chromium itself uses and
- * takes an inventory of the cookies that carry the session. Nothing is written
- * and nothing can be lost.
- *
- * Stage two signs an account out, which is the only mutation Google exposes
- * anywhere near this, and watches whether the remaining accounts re-index. It
- * runs only with `--mutate` and it can sign you out of every account, not just
- * the one named. That is not a hypothetical: it is what happened to the author
- * of this repository the week this file was written, by a different route.
- *
- * A note on where it runs, because it changed the risk assessment. Copying the
- * profile to a scratch directory isolates the LOCAL state, so a read-only pass
- * on a copy is genuinely safe. It does NOT isolate stage two: `Logout` is a
- * request to Google's servers that revokes the session there, and the real
- * profile's cookies point at the same server-side session. A copy protects the
- * cookies on disk and nothing that matters.
- *
- * VALUES ARE NEVER PRINTED. Every cookie named below is a live credential. This
- * reports names, domains, flags and sizes, which is everything the question
- * needs and nothing that would end up in a terminal scrollback.
- *
- *   node tools/google.mjs                 read only
- *   node tools/google.mjs --mutate        signs an account out. See above.
+ * ------------------------------------------------------------------
+ *  Title    |  Google multi-login probe
+ *  Ref      |  cdp.mjs, ListAccounts, Logout
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether Google's account order can change without
+ *           |  signing out.
+ *  How      |  Stage one reads the account list and takes a cookie
+ *           |  inventory, read only. Stage two (--mutate only) signs
+ *           |  an account out and watches the remaining re-index.
+ *  Note     |  Stage two hits Google's servers and can sign out every
+ *           |  account, not just the named one. Values are never
+ *           |  printed: names, domains, flags and sizes only.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';
@@ -44,15 +26,14 @@ const MUTATE = process.argv.includes('--mutate');
 const KEEP = process.argv.includes('--keep');
 
 /**
- * A copy, because Chrome refuses to open a debugging port on the default
- * profile at all:
- *
- *   DevTools remote debugging requires a non-default data directory.
- *
- * Which is the correct behaviour and worth stating plainly: the platform is
- * defending against exactly the thing this script does. The copy is deleted on
- * exit unless --keep, and while it exists it holds a full set of live session
- * cookies in a temp directory.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A profile copy, because Chrome refuses a debugging
+ *           |  port on the default profile ("requires a non-default
+ *           |  data directory").
+ *  Note     |  The platform is defending against exactly this. The
+ *           |  copy holds a full set of live session cookies and is
+ *           |  deleted on exit unless --keep.
+ * ------------------------------------------------------------------
  */
 const SOURCE = join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Google', 'Chrome', 'User Data');
 const CHROME = join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe');
@@ -133,8 +114,10 @@ const evaluate = async (expression, ms = 30_000) => {
 };
 
 /**
- * The list Chromium itself asks for when it renders the account switcher.
- * Returns a JSON array whose order is the `authuser` order.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The list Chromium asks for to render the account
+ *           |  switcher. Returns a JSON array in authuser order.
+ * ------------------------------------------------------------------
  */
 async function listAccounts() {
   const raw = await evaluate(
@@ -193,10 +176,13 @@ for (const c of cookies) {
 }
 
 /**
- * The question the inventory answers on its own: is the ordering carried in a
- * cookie this side could edit, or is it server-side state the cookies merely
- * key into. If every account shares one `SID` rather than each having its own,
- * there is nothing here to reorder, and stage two is the only remaining lever.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether the ordering lives in an editable cookie or in
+ *           |  server-side state the cookies only key into.
+ *  Note     |  If accounts share one SID rather than each having its
+ *           |  own, there is nothing here to reorder and stage two is
+ *           |  the only lever left.
+ * ------------------------------------------------------------------
  */
 const perAccount = cookies.filter((c) => /^(__Secure-)?\d*PSID|ACCOUNT_CHOOSER|LSID|OSID/i.test(c.name));
 console.log(

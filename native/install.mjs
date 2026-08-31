@@ -1,14 +1,19 @@
 /**
- * Registers the native host with every browser on this machine that will talk
- * to it.
- *
- *   node native/install.mjs <extension-id> [more ids...]
- *   node native/install.mjs --uninstall
- *
- * Native messaging is opt-in from both ends: the browser will only launch a
- * host that is registered, and the host manifest names exactly which extension
- * ids may connect. Get either half wrong and the port simply fails to open,
- * with no error anywhere except runtime.lastError.
+ * ------------------------------------------------------------------
+ *  Title    |  Native host installer
+ *  Ref      |  host.mjs, HOST_NAME, HIVES
+ *  ID       |  native host
+ * ------------------------------------------------------------------
+ *  Purpose  |  Register the native host with every browser on this
+ *           |  machine that will talk to it.
+ *  How      |  node native/install.mjs <extension-id> [more ids...],
+ *           |  or --uninstall to remove.
+ *  Note     |  Opt-in from both ends: the browser only launches a
+ *           |  registered host, and the manifest names which ids may
+ *           |  connect. Get either half wrong and the port fails to
+ *           |  open, with nothing but runtime.lastError.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { execFile } from 'node:child_process';
@@ -29,12 +34,14 @@ const LAUNCHER = join(NATIVE, 'nvx-host.bat');
 const MANIFEST = join(NATIVE, `${HOST_NAME}.json`);
 
 /**
- * Hives to write, in order of how likely they are to exist.
- *
- * Opera reads its own hive rather than Chrome's, and its path has moved between
- * versions, so every plausible one is written rather than probed: a stray
- * registry key under a browser that is not installed costs nothing, and a
- * missing one costs an afternoon of a port that will not open.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Registry hives to write, likeliest to exist first.
+ *  Note     |  Opera reads its own hive, not Chrome's, and its path
+ *           |  has moved between versions, so every plausible one is
+ *           |  written rather than probed: a stray key under a browser
+ *           |  that is not installed costs nothing, a missing one
+ *           |  costs an afternoon of a port that will not open.
+ * ------------------------------------------------------------------
  */
 const HIVES = [
   'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts',
@@ -44,13 +51,15 @@ const HIVES = [
 ];
 
 /**
- * Windows cannot launch a .mjs directly.
- *
- * Native messaging spawns the manifest's `path` as a process, and on Windows
- * that has to be something the shell can execute. A batch shim that forwards
- * to the current Node is the smallest thing that works and keeps the host
- * itself a plain script. A packaged build replaces this with the binary and
- * drops the shim entirely.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Windows cannot launch a .mjs directly.
+ *  How      |  Native messaging spawns the manifest's path as a
+ *           |  process, which on Windows must be shell-executable, so
+ *           |  a batch shim forwards to the current Node. Smallest
+ *           |  thing that works and keeps the host a plain script.
+ *  Note     |  A packaged build replaces this with the binary and
+ *           |  drops the shim entirely.
+ * ------------------------------------------------------------------
  */
 function writeLauncher() {
   const bat = [

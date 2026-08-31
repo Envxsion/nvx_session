@@ -1,15 +1,20 @@
 /**
- * Syntax gate. Runs before anything is loaded into a browser, because an
- * extension with a parse error in its service worker fails silently: the
- * worker never registers and every API probe reports absent, which looks
- * exactly like a browser that lacks the API.
- *
- * It also carries the em dash sweep, and the reason it lives here rather than
- * in a one-off script is that the one-off script was wrong. It looked for the
- * character and reported zero while `DESIGN.html` carried forty seven
- * `&#8212;` entities, which render as exactly the character it was looking for.
- * A check that passes because it is asking the wrong question is worse than no
- * check, because it is evidence.
+ * ------------------------------------------------------------------
+ *  Title    |  Syntax gate
+ *  Ref      |  node --check, probes/ tools/ packages/ extension/
+ *  ID       |  build
+ * ------------------------------------------------------------------
+ *  Purpose  |  Parse-check every script before a browser loads it.
+ *  How      |  A parse error in a service worker fails silently: the
+ *           |  worker never registers and every API probe reports
+ *           |  absent, which looks like a browser lacking the API.
+ *           |  Also runs the em dash sweep.
+ *  Note     |  The sweep lives here, not in a one-off script, because
+ *           |  the one-off looked for the character and reported zero
+ *           |  while DESIGN.html carried dozens of em-dash entities
+ *           |  that render as exactly that character.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { readdir, readFile } from 'node:fs/promises';
@@ -19,10 +24,14 @@ import { promisify } from 'node:util';
 
 const run = promisify(execFile);
 /**
- * extension/ is here for the same reason the worker is: panel.js and chooser.js
- * are loaded by the browser as classic scripts, and a parse error in either is
- * silent. The picker failing to parse would leave a held tab showing a page
- * with no options on it and no way forward, which is worse than never holding.
+ * ------------------------------------------------------------------
+ *  Purpose  |  extension/ is checked for the same reason the worker
+ *           |  is.
+ *  Note     |  panel.js and chooser.js load as classic scripts, and a
+ *           |  parse error in either is silent. The picker failing to
+ *           |  parse leaves a held tab with no options and no way
+ *           |  forward, worse than never holding.
+ * ------------------------------------------------------------------
  */
 const ROOTS = ['probes', 'tools', 'packages', 'extension'];
 const SKIP = new Set(['node_modules', '.git', 'dist']);
@@ -61,9 +70,12 @@ console.log(`\n${files.length - failed}/${files.length} parsed`);
 // ------------------------------------------------------------- the dash sweep
 
 /**
- * Every form that renders as an em dash, which is the thing being banned. The
- * en dash is left alone: it is a range, `T0-T2` or `300-800 MB`, and reads as
- * one.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Every form that renders as an em dash, the thing
+ *           |  being banned.
+ *  Note     |  The en dash is left alone: it is a range, `T0-T2` or
+ *           |  `300-800 MB`, and reads as one.
+ * ------------------------------------------------------------------
  */
 const DASHES = /—|―|&#8212;|&#x2014;|&mdash;/gi;
 const TEXT = ['.md', '.html', '.css', '.js', '.mjs', '.ts', '.json'];

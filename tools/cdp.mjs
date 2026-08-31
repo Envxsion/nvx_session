@@ -1,7 +1,15 @@
 /**
- * Minimal CDP client. Node 22 ships a global WebSocket, so this needs no
- * dependencies, which matters for a diagnostic that has to run before the
- * project has a toolchain.
+ * ------------------------------------------------------------------
+ *  Title    |  Minimal CDP client
+ *  Ref      |  connect, loadUnpacked, browserEndpoint
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  A dependency-free Chrome DevTools Protocol client.
+ *  Note     |  Node 22 ships a global WebSocket, so this needs no
+ *           |  dependencies, which matters for a diagnostic that runs
+ *           |  before the project has a toolchain.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 export async function connect(wsUrl, { timeout = 10_000 } = {}) {
@@ -64,13 +72,14 @@ export async function connect(wsUrl, { timeout = 10_000 } = {}) {
 }
 
 /**
- * Side-loads an unpacked extension and returns its id.
- *
- * Chrome removed --load-extension in M137, so on current Chrome this is the
- * only route. Older Chromium builds, which is what Opera GX ships, may still
- * honour the flag; callers should treat an already-present extension as fine
- * but must identify it by id rather than by "some service worker exists",
- * because component extensions have service workers too.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Side-load an unpacked extension and return its id.
+ *  How      |  Chrome removed --load-extension in M137, so on current
+ *           |  Chrome this is the only route. Older Chromium (Opera
+ *           |  GX) may still honour the flag.
+ *  Note     |  Identify the extension by id, not by "some service
+ *           |  worker exists": component extensions have workers too.
+ * ------------------------------------------------------------------
  */
 export async function loadUnpacked(browser, path) {
   try {

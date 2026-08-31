@@ -1,19 +1,20 @@
 /**
- * Screenshots the control panel, or the toolbar popup.
- *
- * Typechecking says nothing about whether two labels collapse into one word or
- * a quiet button reads as a disabled one, and both of those shipped and were
- * only caught by looking. This loads the built extension, opens the surface, and
- * writes a png.
- *
- *   node tools/shot.mjs opera out.png
- *   node tools/shot.mjs opera out.png --seed    creates a couple of sessions first
- *   node tools/shot.mjs opera pop.png --popup   the toolbar popup, at its real width
- *
- * The popup cannot be opened by clicking the toolbar from here, so it is loaded
- * as a page at the width the browser gives it. That is the same document and the
- * same stylesheet; what it does not prove is the height the browser will allow,
- * which is why the popup caps itself rather than trusting the chrome.
+ * ------------------------------------------------------------------
+ *  Title    |  Surface screenshots
+ *  Ref      |  cdp.mjs, popup.html, diagnostics.html
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Screenshot the control panel, or the toolbar popup.
+ *  How      |  Typechecking says nothing about two labels collapsing
+ *           |  into one word, or a quiet button reading as disabled;
+ *           |  both shipped and were only caught by looking. Loads the
+ *           |  built extension, opens the surface, writes a png.
+ *  Note     |  The popup cannot be opened from the toolbar here, so it
+ *           |  loads as a page at the browser's width: same document
+ *           |  and stylesheet, but not the height, which is why the
+ *           |  popup caps itself rather than trusting the chrome.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';
@@ -40,9 +41,12 @@ const popup = process.argv.includes('--popup');
 // interesting layout problems are in the ones that widen.
 const view = (process.argv.find((a) => a.startsWith('--view=')) ?? '').split('=')[1] ?? '';
 /**
- * Any other page in the package, for the surfaces that are neither the panel
- * nor the popup: the setup screen and the guide. Both are full width documents
- * with no state to seed, so photographing them is the whole of checking them.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Any other page in the package, for surfaces that are
+ *           |  neither the panel nor the popup: setup and the guide.
+ *  Note     |  Both are full-width documents with no state to seed, so
+ *           |  photographing them is the whole of checking them.
+ * ------------------------------------------------------------------
  */
 const page = (process.argv.find((a) => a.startsWith('--page=')) ?? '').split('=')[1] ?? '';
 const binary = (BROWSERS[which] ?? []).find((p) => existsSync(p));
@@ -54,14 +58,14 @@ if (!binary) {
 const profile = mkdtempSync(join(tmpdir(), 'nvx-shot-'));
 
 /**
- * The first free port, not a random one.
- *
- * A random port in a hundred wide collides often enough to matter when shots
- * are taken back to back, and a collision does not fail: it connects to the
- * browser still shutting down from the last run and photographs whatever that
- * one had on screen. It produced a file named p-home.png containing the third
- * parties view, which is the kind of wrong answer that wastes an hour because
- * nothing about it looks like an error.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The first free port, not a random one.
+ *  Note     |  A random port collides often enough to matter for
+ *           |  back-to-back shots, and a collision connects to the
+ *           |  browser still shutting down from the last run and
+ *           |  photographs whatever it had on screen, a wrong answer
+ *           |  that wastes an hour because nothing looks like an error.
+ * ------------------------------------------------------------------
  */
 async function freePort(from) {
   for (let p = from; p < from + 40; p++) {

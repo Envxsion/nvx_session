@@ -38,9 +38,12 @@ function paintTally(node, rows) {
 }
 
 /**
- * Rows animate in on a short stagger so the eye can follow the fill rather
- * than being handed a finished block. The stagger is capped so a long list
- * never feels like it is loading slowly.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Paint result rows with a short entrance stagger, so
+ *           |  the eye follows the fill rather than a finished block.
+ *  Note     |  The stagger is capped so a long list never feels like
+ *           |  it is loading slowly.
+ * ------------------------------------------------------------------
  */
 function paintRows(node, rows) {
   node.innerHTML = '';
@@ -79,8 +82,11 @@ function paintRows(node, rows) {
 }
 
 /**
- * A button owns its own busy state, including its label. Width is fixed in CSS
- * so swapping the label never reflows the row.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A button owns its own busy state, including its label.
+ *  Note     |  Width is fixed in CSS so swapping the label never
+ *           |  reflows the row.
+ * ------------------------------------------------------------------
  */
 async function withBusy(btn, label, fn) {
   const original = btn.textContent;

@@ -1,27 +1,33 @@
 /**
- * Native messaging framing.
- *
- * Chrome speaks to a native host over stdio with a four byte little-endian
- * length prefix followed by UTF-8 JSON. The extension side never sees this:
- * chrome.runtime.connectNative does the framing and hands over parsed objects.
- * Only the host has to get it right, which is why this lives here rather than
- * in src/.
- *
- * The failure mode worth designing against is a partial read. stdin delivers
- * whatever the pipe had, which is not the same as whatever was written: a
- * message can arrive split across chunks, several can arrive in one, and a
- * length prefix itself can be split. A reader that assumes one chunk is one
- * message works perfectly until the day a message crosses a buffer boundary,
- * and then corrupts silently.
+ * ------------------------------------------------------------------
+ *  Title    |  Native messaging framing
+ *  Ref      |  host.mjs, chrome.runtime.connectNative
+ *  ID       |  native host
+ * ------------------------------------------------------------------
+ *  Purpose  |  Frame native-host stdio: a 4-byte little-endian length
+ *           |  prefix, then UTF-8 JSON.
+ *  How      |  connectNative frames the extension side and hands over
+ *           |  parsed objects, so only the host has to, which is why
+ *           |  this lives here rather than in src/.
+ *  Note     |  Designed against the partial read: a message can split
+ *           |  across chunks, several can arrive in one, the length
+ *           |  prefix itself can split. A one-chunk-one-message reader
+ *           |  works until a message crosses a buffer boundary, then
+ *           |  corrupts silently.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 export const PROTOCOL_VERSION = 1;
 
 /**
- * Chrome's own limits: a message from the extension may not exceed 4 GB in
- * theory but is capped at 1 MB in practice, and a message to it at 64 MB.
- * Anything past this is a framing error, not a large message, and continuing
- * to buffer on a bad length prefix is how a host eats all available memory.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Chrome's own message-size ceiling.
+ *  Note     |  From the extension is capped at 1 MB in practice (4 GB
+ *           |  in theory), to it at 64 MB. Past this is a framing
+ *           |  error, not a large message, and buffering on a bad
+ *           |  length prefix is how a host eats all available memory.
+ * ------------------------------------------------------------------
  */
 export const MAX_MESSAGE_BYTES = 1024 * 1024;
 
@@ -40,10 +46,12 @@ export class FrameError extends Error {
 }
 
 /**
- * Accumulates chunks and yields whole messages.
- *
- * Deliberately a class with explicit buffering rather than a stream transform,
- * so the partial-read behaviour is directly testable without a pipe.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Accumulate chunks and yield whole messages.
+ *  Note     |  A class with explicit buffering rather than a stream
+ *           |  transform, so the partial-read behaviour is directly
+ *           |  testable without a pipe.
+ * ------------------------------------------------------------------
  */
 export class FrameReader {
   #buffer = Buffer.alloc(0);

@@ -1,19 +1,18 @@
 /**
- * Does the mark come off when the extension goes away.
- *
- * The session mark is a `link rel=icon` this extension puts into the page, so
- * it belongs to the document rather than to the extension. Removing the
- * extension therefore does not remove it: every managed tab keeps wearing a
- * coloured dot with nothing left to explain it, which is what was reported. And
- * there is no uninstall hook that could tidy it afterwards, because by then
- * nothing of ours is running.
- *
- * The only moment left is the port disconnecting, so that is what this drives:
- * mark a tab, disable the extension out from under it, and read the page's
- * favicon back.
- *
- *   node tools/fixture/server.mjs
- *   node tools/uninstall.mjs
+ * ------------------------------------------------------------------
+ *  Title    |  Mark cleanup on uninstall
+ *  Ref      |  fixture/server.mjs, link rel=icon
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether the tab mark comes off when the extension goes
+ *           |  away.
+ *  How      |  Mark a tab, disable the extension out from under it,
+ *           |  and read the page's favicon back.
+ *  Note     |  The mark is a link rel=icon on the document, so removal
+ *           |  does not clear it and there is no uninstall hook. The
+ *           |  port disconnecting is the only moment left.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';
@@ -95,11 +94,14 @@ await new Promise((r) => setTimeout(r, 2000));
 
 
 /**
- * The agent is registered only for hosts a session cares about, and a content
- * script only enters a document as it loads. So the session has to exist, the
- * registration has to land, and only then can the page be loaded into it.
- * Skipping that leaves a page with no agent in it, which reads exactly like a
- * mark that failed rather than one that was never asked for.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The session must exist and the agent be registered
+ *           |  before the page loads into it.
+ *  Note     |  The agent covers only hosts a session cares about and a
+ *           |  content script enters only as a document loads. Skipping
+ *           |  this leaves a page with no agent, reading like a failed
+ *           |  mark rather than one never asked for.
+ * ------------------------------------------------------------------
  */
 await browser.send(
   'Runtime.evaluate',
@@ -121,11 +123,13 @@ await browser.send('Page.reload', {}, { sessionId: psid }).catch(() => undefined
 await new Promise((r) => setTimeout(r, 2500));
 
 /**
- * The fixture serves no icon and the compositor needs one to draw onto, so the
- * page is given one. A raster icon, drawn here rather than written as an SVG
- * literal: the compositing happens in a worker, which has no SVG decoder, so an
- * SVG icon is skipped and this probe would be measuring that instead of what it
- * came to measure.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The fixture serves no icon and the compositor needs
+ *           |  one, so the page is given a raster icon.
+ *  Note     |  Drawn here, not as an SVG literal: compositing happens
+ *           |  in a worker with no SVG decoder, so an SVG icon is
+ *           |  skipped and the probe would measure that instead.
+ * ------------------------------------------------------------------
  */
 await browser.send(
   'Runtime.evaluate',
@@ -214,17 +218,16 @@ check('the tab is wearing a mark', before.marked === 1, JSON.stringify(before));
 check('and the page is not showing two icons at once', before.total - before.marked <= 1, JSON.stringify(before));
 
 /**
- * Out from under it. To the page an uninstall and a disable look the same: the
- * port drops and the isolated world is destroyed.
- *
- * Confirmed by the heartbeat rather than by the worker target. The first
- * version of this watched for the service worker disappearing and concluded the
- * extension was gone, which is wrong in the most ordinary way possible: an MV3
- * worker is terminated whenever it is idle, so that target is absent most of
- * the time on a healthy extension. The probe then declared success, never tried
- * the second removal method, and spent thirty seconds waiting for a watchdog
- * whose heartbeat was still merrily ticking. The agent stamping the document is
- * the only thing that means the agent is running.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Confirm the extension is gone by the heartbeat, not
+ *           |  the worker target. To a page, uninstall and disable
+ *           |  look the same: the port drops, the isolated world dies.
+ *  Bug-Fix  |  The first version watched for the worker disappearing
+ *           |  and called it gone, but an MV3 worker is terminated
+ *           |  whenever idle, so it is absent most of the time on a
+ *           |  healthy extension. The agent stamping the document is
+ *           |  the only proof it is running.
+ * ------------------------------------------------------------------
  */
 const stamp = async () => {
   // Tolerant, because uninstalling can take the debugger session with it and a

@@ -1,9 +1,15 @@
 /**
- * Assembles the loadable extension.
- *
- * tsc emits ES modules into dist/src, which an MV3 service worker declared
- * with type "module" can load directly. No bundler is involved, so the
- * unpacked build stays inspectable and loads with no toolchain.
+ * ------------------------------------------------------------------
+ *  Title    |  Build the extension
+ *  Ref      |  tsc, dist/, manifest.json
+ *  ID       |  build
+ * ------------------------------------------------------------------
+ *  Purpose  |  Assembles the loadable extension.
+ *  How      |  tsc emits ES modules into dist/src that an MV3 worker
+ *           |  declared type "module" loads directly. No bundler, so
+ *           |  the unpacked build stays inspectable, no toolchain.
+ *  Author   |  Ojas Kekre, 25/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { execFileSync } from 'node:child_process';
@@ -26,84 +32,66 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const STORE_VERSION = '1.0.0';
 
 /**
- * Two builds, one codebase.
- *
- * MV3 is the default and the Chrome Web Store target. MV2 is the Opera path:
- * it swaps a service worker for a persistent background page and declarative
- * rules for a blocking listener, which removes the rule ceiling and the flush
- * race. Everything under src/ is shared and chooses at runtime.
- *
- *   node tools/build.mjs          -> dist/
- *   node tools/build.mjs --mv2    -> dist-mv2/
+ * ------------------------------------------------------------------
+ *  Purpose  |  Two builds, one codebase.
+ *  How      |  MV3 is the default and the Web Store target. MV2 is
+ *           |  the Opera path: a persistent background page and a
+ *           |  blocking listener, which drops the rule ceiling and
+ *           |  the flush race. src/ is shared, chosen at runtime.
+ *  Note     |  build.mjs -> dist/ ; build.mjs --mv2 -> dist-mv2/
+ * ------------------------------------------------------------------
  */
 const mv2 = process.argv.includes('--mv2');
 /**
- * The listing build, as section 19 scoped it.
- *
- * Three differences from the unpacked build, and each one is a store fact
- * rather than a preference:
- *
- * `debugger` moves from `permissions` to `optional_permissions`. It is the most
- * scrutinised permission in the catalogue, it puts "attach a debugger to every
- * page you visit" in the install prompt, and the only thing that uses it is
- * Exact mode, which is off by default and which section 26 records as unable to
- * withhold a cookie. Optional rather than absent, so the prompt goes quiet and
- * review gets easier without closing the door on tier 2.
- *
- * The `key` comes out. It pins the extension id for an unpacked build, which is
- * what stops a rebuild looking like a new install; the store issues its own id
- * from the uploaded package, and shipping a key alongside it is at best
- * confusing and at worst a rejection.
- *
- * And the version gets a real number, because 0.1.0 is not a thing to publish.
- *
- *   node tools/build.mjs --store  -> dist-store/
+ * ------------------------------------------------------------------
+ *  Purpose  |  The listing build, as section 19 scoped it.
+ *  How      |  Three store facts. `debugger` moves from permissions
+ *           |  to optional_permissions (its prompt is the most
+ *           |  scrutinised, only Exact mode uses it, off by default).
+ *           |  The `key` comes out, since the store issues its own
+ *           |  id. The version gets a real number, not 0.1.0.
+ *  Note     |  node tools/build.mjs --store -> dist-store/
+ * ------------------------------------------------------------------
  */
 const store = process.argv.includes('--store');
 const DIST = join(ROOT, mv2 ? 'dist-mv2' : store ? 'dist-store' : 'dist');
 
 /**
- * The build tier, computed here because the compile step below needs it (a Pro
- * build swaps in the private overlay and points the gate at the submodule) and
- * the manifest block near the end stamps it. An explicit NVX_TIER always wins;
- * otherwise a --store build is free and any other build is a developer build.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The build tier, computed here because the compile
+ *           |  step needs it and the manifest block stamps it.
+ *  How      |  A Pro build swaps in the private overlay and points
+ *           |  the gate at the submodule. An explicit NVX_TIER always
+ *           |  wins; else --store is free, any other build is dev.
+ * ------------------------------------------------------------------
  */
 const explicitTier = process.env.NVX_TIER;
 const tier =
   explicitTier === 'pro' ? 'pro' : explicitTier === 'free' ? 'free' : store ? 'free' : 'dev';
 /**
- * Whether the private `pro` submodule is actually checked out. A public
- * free-only clone has an empty src/pro, so even a dev build there falls back to
- * the free stubs and the free feature files rather than failing to find the
- * overlay. This is the property that lets the open-source repository build with
- * no submodule and no toolchain surprises.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether the private `pro` submodule is checked out.
+ *  Note     |  A free-only clone has an empty src/pro, so even a dev
+ *           |  build there falls back to the free stubs rather than
+ *           |  failing to find the overlay. This lets the public repo
+ *           |  build with no submodule and no toolchain surprises.
+ * ------------------------------------------------------------------
  */
 const proPresent = existsSync(join(ROOT, 'src', 'pro', 'index.ts'));
 const useProCode = (tier === 'pro' || tier === 'dev') && proPresent;
 
 /**
- * Whether the listing build carries Persona.
- *
- * Section 19 says it should not: it scopes `nvx-store` to Mirror and
- * Standardize on single-purpose and framing grounds, since "session isolation
- * plus fingerprint control" can read to a reviewer as two products, and
- * anti-detect language invites rejection.
- *
- * Persona is the one posture no competitor offers honestly: a machine per
- * session, stated rather than silently faked. It is the strongest version of
- * the fingerprint story, but it is not the whole of it.
- *
- * Off for the first submission, and this is the corrected call. The earlier note
- * reasoned that shipping it and being asked to remove it costs "one flag", but
- * that assumes a reviewer who negotiates. The store more often rejects a first
- * submission outright with a policy citation, and a posture that fabricates a
- * per-session fingerprint reads as a second purpose, anti-detection, on top of
- * the single purpose this listing claims, which is cookie session isolation.
- * That is the shape that draws a single-purpose rejection, and a rejection on a
- * new account costs the whole review cycle and some trust. Mirror and Standardize
- * still ship, so the free build is still per-session isolation with a validated,
- * honest fingerprint posture, which is the differentiator. Persona returns as a
- * normal feature update once the listing exists. Reversible in one constant.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether the listing build carries Persona.
+ *  How      |  Section 19 scopes nvx-store to Mirror and Standardize;
+ *           |  "isolation plus fingerprint control" can read to a
+ *           |  reviewer as two products.
+ *  Note     |  Off for the first submission. A per-session fingerprint
+ *           |  reads as a second purpose, anti-detection, on top of
+ *           |  the single purpose claimed, which risks a single-purpose
+ *           |  rejection. Mirror and Standardize still ship. Persona
+ *           |  returns as a normal update later. One constant reverts.
+ * ------------------------------------------------------------------
  */
 const STORE_INCLUDES_PERSONA = false;
 
@@ -215,20 +203,19 @@ if (store) {
 }
 
 /**
- * The Pro tier gate, stamped into the manifest for every build.
- *
- * Section 30 ships one package carrying free and Pro code, switched by a licence
- * check rather than by installing a different extension. This is the build half
- * of the belt-and-braces: the manifest states the tier, and a `free` build's
- * entitlement module is inert, so no token however valid unlocks anything. The
- * default is `free`, which is what the store lists today; a tester or the
- * eventual Pro store build sets `NVX_TIER=pro`.
- *
- * The licence endpoint and the public keys are injected here the same way the
- * telemetry endpoint is, and for the same reason: they are public material (an
- * https URL and Ed25519 public keys), the private signing key lives only on the
- * server, and nothing secret enters the bundle. Absent them, a pro build still
- * runs but can activate nothing, which is the safe degradation.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The Pro tier gate, stamped into the manifest for
+ *           |  every build.
+ *  How      |  Section 30 ships one package with free and Pro code,
+ *           |  switched by a licence check. The manifest states the
+ *           |  tier; a free build's entitlement module is inert, so
+ *           |  no token unlocks anything. Default free; a tester or
+ *           |  Pro store build sets NVX_TIER=pro.
+ *  Note     |  Licence endpoint and public keys are injected like the
+ *           |  telemetry endpoint: public material, private signing
+ *           |  key only on the server. Absent them, a pro build runs
+ *           |  but activates nothing, the safe degradation.
+ * ------------------------------------------------------------------
  */
 {
   const path = join(DIST, 'manifest.json');

@@ -1,16 +1,17 @@
 /**
- * Does moving many tabs at once land them all in the session, and does the
- * guard stop a request leaking mid-move.
- *
- * The first half is the feature. The second is why it is worth its own tool: a
- * batch move rebinds several tabs and recompiles once, and the promise is that
- * no tab sends a request under the wrong account while that happens. The move
- * installs a block naming every moving tab, holds it across the recompile, and
- * lifts it only once the new rules are live. This checks the block exists during
- * the window and is gone after.
- *
- *   node tools/fixture/server.mjs
- *   node tools/move.mjs
+ * ------------------------------------------------------------------
+ *  Title    |  Bulk tab move probe
+ *  Ref      |  fixture/server.mjs, moveTabs
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether a bulk move lands every tab in the session,
+ *           |  and the guard stops a request leaking mid-move.
+ *  How      |  The move installs a block naming every moving tab,
+ *           |  holds it across the recompile, and lifts it once the
+ *           |  new rules are live. Checks the block is present during
+ *           |  the window and gone after.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';

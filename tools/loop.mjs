@@ -1,20 +1,19 @@
 /**
- * Does the sign-in loop detector fire, and does it stay quiet when it should.
- *
- * The detector exists because of one incident, and the incident is the reason
- * both halves are checked here rather than only the first. A detector that
- * catches the loop is worth a great deal; a detector that also fires on an
- * ordinary federated sign-in would take a working login away from somebody and
- * tell them it was for their own good, which is a worse product than not having
- * one.
- *
- * Three cases:
- *   a managed tab in an endless loop  -> released, tabs handed back
- *   a managed tab signing in normally -> untouched
- *   an unmanaged tab in the same loop -> untouched, because nothing here caused it
- *
- *   node tools/fixture/server.mjs
- *   node tools/loop.mjs
+ * ------------------------------------------------------------------
+ *  Title    |  Sign-in loop detector probe
+ *  Ref      |  fixture/server.mjs, /loop, releaseSite
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether the loop detector fires, and stays quiet when
+ *           |  it should.
+ *  How      |  Three cases. A managed tab in an endless loop ->
+ *           |  released, tabs handed back. A managed tab signing in
+ *           |  normally -> untouched. An unmanaged tab in the same
+ *           |  loop -> untouched.
+ *  Note     |  Both halves matter: firing on an ordinary federated
+ *           |  sign-in would take a working login away.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';

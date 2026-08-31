@@ -1,10 +1,16 @@
 /**
- * Attaches to the probe's service worker and streams its console, exceptions
- * and evaluation results. An MV3 service worker that throws during startup
- * fails silently: the extension appears installed, every API reports absent,
- * and nothing is written anywhere. This is how you find out why.
- *
- *   node tools/debug-probe.mjs chrome
+ * ------------------------------------------------------------------
+ *  Title    |  Probe worker debugger
+ *  Ref      |  cdp.mjs, probes/capability
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Attaches to the probe's service worker and streams its
+ *           |  console, exceptions and evaluation results.
+ *  Note     |  An MV3 worker that throws at startup fails silently:
+ *           |  the extension looks installed while every API reports
+ *           |  absent. This is how you find out why.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';

@@ -1,35 +1,43 @@
 /**
- * The handful of things every surface needs.
- *
- * Four pages load this: the popup, the diagnostics panel, the guide and the
- * setup screen. It exists because the alternative was each of them defining its
- * own `$` and its own colour lookup, and the moment two surfaces compute a
- * session colour separately is the moment they disagree about the same session.
- *
- * Nothing here talks to the worker on load or touches the DOM on load. It is
- * safe to include on a page that has none of the panel's elements, which is
- * exactly why it is separate from `panel.js`.
+ * ------------------------------------------------------------------
+ *  Title    |  Shared surface helpers
+ *  Ref      |  popup.js, panel.js, guide.js, welcome.js
+ *  ID       |  M6 (popup UI)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The handful of things every surface needs.
+ *  How      |  One $, one colour lookup, tone and toast, shared so no
+ *           |  two surfaces compute a session colour apart and then
+ *           |  disagree about the same session.
+ *  Note     |  Talks to no worker and touches no DOM on load, so it is
+ *           |  safe on a page with none of the panel's elements.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 const $ = (id) => document.getElementById(id);
 const send = (msg) => new Promise((resolve) => chrome.runtime.sendMessage(msg, resolve));
 
 /**
- * The identity ramp, in wheel order.
- *
- * Eight rather than six, and ordered so that consecutive picks are far apart
- * in hue: sessions are handed colours in this order, so the second session a
- * user makes must not look like the first one under a dim screen. Chalk is a
- * neutral on purpose, and sits last because a session that reads as "no
- * colour" is the least useful default even though it is the most distinct.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The identity ramp, in wheel order.
+ *  Note     |  Eight, ordered so consecutive picks sit far apart in
+ *           |  hue, so a user's second session does not look like the
+ *           |  first under a dim screen. Chalk is a deliberate neutral
+ *           |  and sits last, the least useful default but the most
+ *           |  distinct.
+ * ------------------------------------------------------------------
  */
 const COLORS = ['cyan', 'coral', 'jade', 'violet', 'amber', 'azure', 'magenta', 'chalk'];
 const RULES_PER_SESSION = 320;
 
 /**
- * A ramp name, or a raw hex if a session was ever given one directly. Without
- * the second case the panel shows grey for a colour the tab mark draws
- * correctly, and the two surfaces disagree about the same session.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Resolve a ramp name, or a raw hex if a session was
+ *           |  given one directly.
+ *  Note     |  Without the hex case the panel shows grey for a colour
+ *           |  the tab mark draws right, so the two surfaces disagree
+ *           |  about the same session.
+ * ------------------------------------------------------------------
  */
 const hex = (name) => {
   if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(name ?? '')) return name;
@@ -42,11 +50,13 @@ const hex = (name) => {
 };
 
 /**
- * Colours a dot through a custom property rather than through background.
- *
- * The dot draws its own halo from the same value, and setting background
- * directly leaves the halo on the default grey, so every coloured dot came out
- * ringed in the wrong colour.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Colour a dot through a custom property, not through
+ *           |  background.
+ *  Note     |  The dot draws its halo from the same value; setting
+ *           |  background directly leaves the halo grey, ringing every
+ *           |  coloured dot in the wrong colour.
+ * ------------------------------------------------------------------
  */
 function tone(node, color) {
   node.style.setProperty('--dot-tone', color ? hex(color) : 'var(--mute-5)');
@@ -65,15 +75,17 @@ function plural(n, one, many) {
 }
 
 /**
- * A brief message at the foot of the surface, with at most one action.
- *
- * It exists for things that already happened and can be taken back: a bulk move
- * is done the instant it is asked for, so the only honest place to offer "undo"
- * is after the fact, and an undo the user cannot find is not an undo. The toast
- * owns its own host node and appends it on first use, so any of the pages that
- * load this file can call it without adding markup, and nothing is touched on
- * load. Calling it again replaces whatever was showing; a plain message clears
- * itself sooner than one carrying an action, because there is nothing to reach.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A brief message at the foot of the surface, with at
+ *           |  most one action.
+ *  How      |  Owns its host node and appends it on first use, so any
+ *           |  page can call it without markup and nothing loads.
+ *           |  Calling again replaces what showed; a plain message
+ *           |  clears sooner than one carrying an action.
+ *  Note     |  For things already done and undoable: a bulk move runs
+ *           |  the instant it is asked, so "undo" is only honest after
+ *           |  the fact.
+ * ------------------------------------------------------------------
  */
 let toastTimer = null;
 function toast(message, action) {

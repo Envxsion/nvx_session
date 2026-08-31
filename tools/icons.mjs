@@ -1,19 +1,19 @@
 /**
- * The toolbar and listing icons, drawn from the same geometry as the mark in
- * the popup header.
- *
- * Generated rather than drawn by hand, and generated from the numbers already
- * in `popup.js` rather than from a copy of them, because the one thing worse
- * than no icon is an icon that is nearly the logo. Three concentric broken
- * rings, each further round the turn and each fainter, which is the same figure
- * the panel puts beside the word NVX.
- *
- * PNG is written by hand here for the same reason the rest of this repository
- * avoids dependencies: an icon set is eleven kilobytes of pixels and does not
- * justify a toolchain. The encoder below is deflate-stored plus a CRC, which is
- * a valid PNG that every decoder reads and no compressor is needed for.
- *
- *   node tools/icons.mjs
+ * ------------------------------------------------------------------
+ *  Title    |  Toolbar and listing icons
+ *  Ref      |  popup.js rings, PNG encoder
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Draw the toolbar and listing icons from the same
+ *           |  geometry as the popup header mark.
+ *  How      |  Generated from the numbers in popup.js, not a copy, so
+ *           |  an icon is never nearly the logo. Three concentric
+ *           |  broken rings, each further round the turn and fainter.
+ *  Note     |  PNG is written by hand (deflate-stored plus a CRC) to
+ *           |  avoid a toolchain for eleven kilobytes of pixels.
+ *           |  node tools/icons.mjs
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
@@ -37,9 +37,12 @@ const RINGS = [
 ];
 
 /**
- * Supersampled, because a two pixel stroke at sixteen pixels across is one
- * pixel of ring and one of aliasing, and the aliasing is what makes a small
- * icon look like a smudge rather than a shape.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Supersampled, because a two pixel stroke at sixteen
+ *           |  pixels across is one pixel of ring and one of aliasing.
+ *  Note     |  The aliasing is what makes a small icon look like a
+ *           |  smudge rather than a shape.
+ * ------------------------------------------------------------------
  */
 const SS = 4;
 

@@ -1,14 +1,19 @@
 /**
- * The diagnostics panel, and everything the popup shares with it.
- *
- * One state payload, painted by whichever elements the page happens to have:
- * every painter below returns early when its node is missing, so the popup and
- * the full page can carry different subsets of the same surface without either
- * one knowing about the other.
- *
- * `$`, `send`, `el`, `plural`, `hex` and the colour ramp live in `base.js`,
- * which loads first on every page. Two surfaces computing a session colour
- * separately is how they come to disagree about the same session.
+ * ------------------------------------------------------------------
+ *  Title    |  Diagnostics panel
+ *  Ref      |  popup.js, base.js
+ *  ID       |  M6 (popup UI)
+ * ------------------------------------------------------------------
+ *  Purpose  |  The diagnostics panel, and everything the popup
+ *           |  shares with it.
+ *  How      |  One state payload; every painter returns early when
+ *           |  its node is missing, so the popup and the full page
+ *           |  carry different subsets of one surface.
+ *  Note     |  $, send, el, plural, hex and the ramp live in base.js,
+ *           |  loaded first. Computing a colour twice is how two
+ *           |  surfaces come to disagree about a session.
+ *  Author   |  Ojas Kekre, 25/08/2026
+ * ------------------------------------------------------------------
  */
 
 let state = { sessions: [], bindings: [], desync: null, settings: {}, groupsAvailable: false };
@@ -24,8 +29,11 @@ let adoptBindTabs = true;
 let adoptNameTouched = false;
 
 /**
- * A button owns its own busy state. Width is fixed in CSS so swapping the
- * label never reflows the row it sits in.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A button owns its own busy state.
+ *  Note     |  Width is fixed in CSS, so swapping the label never
+ *           |  reflows the row it sits in.
+ * ------------------------------------------------------------------
  */
 async function busy(btn, label, fn) {
   const original = btn.textContent;
@@ -66,17 +74,16 @@ function paintStrip() {
 // ------------------------------------------------------------ deleting
 
 /**
- * Deleting a session destroys its cookie jar, and there is no undo.
- *
- * So the row arms rather than acting. The second press names what is actually
- * lost instead of asking "are you sure", which is a question nobody reads: a
- * count of cookies and, where the session's tokens say so, the site those
- * cookies sign you in to.
- *
- * Not a modal, and not `confirm()`. A popup closes the moment it loses focus,
- * and a native dialog blocks the extension's own event loop, so the surface
- * asking the question would be destroyed by the act of asking it. That is the
- * same reason the account picker is a held navigation rather than an overlay.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Deleting a session destroys its cookie jar, with no
+ *           |  undo, so the row arms rather than acting.
+ *  How      |  The second press names what is lost, a cookie count
+ *           |  and the site they sign into, not "are you sure".
+ *  Note     |  Not a modal or confirm(): a popup closes on blur and a
+ *           |  native dialog blocks the event loop, so asking would
+ *           |  destroy the surface asking. Same reason the picker is
+ *           |  a held navigation rather than an overlay.
+ * ------------------------------------------------------------------
  */
 let armed = null;
 
@@ -246,11 +253,13 @@ function paintSessions() {
 }
 
 /**
- * Which tabs are ticked, kept across repaints by tab id.
- *
- * A set rather than a flag on each row, because the list repaints on a timer
- * and a selection stored in the DOM would be wiped every time a cookie count
- * changed somewhere. Ids that are no longer open are pruned on each paint.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Which tabs are ticked, kept across repaints by tab id.
+ *  How      |  A set, not a flag per row: the list repaints on a
+ *           |  timer, so a selection in the DOM would be wiped on
+ *           |  every cookie-count change. Closed ids are pruned each
+ *           |  paint.
+ * ------------------------------------------------------------------
  */
 const picked = new Set();
 let moveBusy = false;
@@ -348,12 +357,13 @@ function domainOfUrl(u) {
 }
 
 /**
- * The action bar under the tab list.
- *
- * Two kinds of selection, because two kinds of intent. Ticking rows by hand is
- * the precise one. "All on this site" is the common one: somebody has six
- * Google tabs and wants them all in Work, and picking them one by one is
- * exactly the tedium this whole feature removes.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The action bar under the tab list.
+ *  Note     |  Two selections for two intents: ticking rows by hand
+ *           |  is the precise one, "All on this site" the common one,
+ *           |  since picking six tabs one by one is the tedium this
+ *           |  feature removes.
+ * ------------------------------------------------------------------
  */
 function paintMoveBar() {
   const bar = $('tab-move');
@@ -443,13 +453,13 @@ function paintMoveBar() {
 }
 
 /**
- * Puts a moved batch back where it came from.
- *
- * The tabs did not all start in the same session, so a single reverse move
- * would be wrong: the undo groups them by where each one was and sends one
- * guarded move per group, through the same path the forward move used, so the
- * mid-move block protects the way back exactly as it protected the way there. A
- * tab whose previous state was no session goes back to none.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Put a moved batch back where it came from.
+ *  How      |  Tabs did not all start in one session, so undo groups
+ *           |  them by origin and sends one guarded move per group,
+ *           |  through the forward path, so the mid-move block guards
+ *           |  the way back too. No-session tabs go back to none.
+ * ------------------------------------------------------------------
  */
 async function undoMove(prior) {
   const byDest = new Map();
@@ -554,12 +564,14 @@ function paintChannels() {
 // ---------------------------------------------------------- fingerprint
 
 /**
- * The posture, described by what it does rather than by how private it sounds.
- *
- * Mirror is the default and the honest one. Six of your own accounts sharing a
- * device fingerprint is unremarkable and agencies do it daily; what raises a
- * flag is incoherence, so fabricating nothing is a real answer rather than the
- * absence of one, and the copy has to say that instead of reading as "off".
+ * ------------------------------------------------------------------
+ *  Purpose  |  The posture, described by what it does, not by how
+ *           |  private it sounds.
+ *  Note     |  Mirror is the default and the honest one: many of your
+ *           |  own accounts sharing a device is unremarkable, and
+ *           |  incoherence is what raises a flag, so fabricating
+ *           |  nothing is a real answer, not "off".
+ * ------------------------------------------------------------------
  */
 const POSTURES = [
   {
@@ -580,17 +592,15 @@ const POSTURES = [
 ];
 
 /**
- * The off switch.
- *
- * It exists because the first question when a site starts misbehaving is
- * whether this extension is why, and until there was a pause the only way to
- * answer that was to uninstall, which throws away every session to run one
- * experiment. It is also the honest answer to a site this cannot handle yet: a
- * sign-in that will not complete is better paused than fought.
- *
- * Deliberately not framed as a toggle among the others. It turns off the thing
- * the whole product is for, so it says so in full rather than reading as one
- * more preference.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The off switch.
+ *  Note     |  The first question when a site misbehaves is whether
+ *           |  this extension is why; before pause the only answer
+ *           |  was to uninstall, throwing away every session. Also
+ *           |  the honest answer to a site it cannot handle yet.
+ *           |  Not framed as one more toggle: it turns off the whole
+ *           |  product, so it says so in full.
+ * ------------------------------------------------------------------
  */
 function paintPause() {
   const btn = $('pause');
@@ -614,13 +624,14 @@ function paintPause() {
 }
 
 /**
- * Sites this extension has been told to leave alone.
- *
- * Listed rather than only recorded, because most of these will have been added
- * automatically by the sign-in loop detector, and a tool that silently stops
- * managing things is indistinguishable from one that is quietly broken. If
- * something is not being isolated, the reason has to be somewhere the user can
- * find without reading a journal.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Sites this extension has been told to leave alone.
+ *  Note     |  Listed, not just recorded: most are added by the
+ *           |  sign-in loop detector, and a tool that silently stops
+ *           |  managing things looks like one quietly broken. A
+ *           |  skipped site's reason must be findable without the
+ *           |  journal.
+ * ------------------------------------------------------------------
  */
 function paintReleased() {
   const node = $('released');
@@ -659,13 +670,14 @@ function paintReleased() {
 }
 
 /**
- * A Pro-gated toggle in the Isolation section (fail closed, cache isolation).
- *
- * Only rendered where it can matter: a build that can unlock it (dev, or a Pro
- * build showing it locked as an upsell). A free store build never shows it. When
- * locked it carries a Pro tag and does nothing; when available it toggles the
- * setting. The copy has two forms so it can say what the feature does when it is
- * yours and what it would do when it is not.
+ * ------------------------------------------------------------------
+ *  Purpose  |  A Pro-gated toggle in the Isolation section (fail
+ *           |  closed, cache isolation).
+ *  How      |  Rendered only where it can matter: a dev or Pro build.
+ *           |  A free build never shows it. Locked, it carries a Pro
+ *           |  tag and does nothing; available, it toggles the
+ *           |  setting. The copy has an owned form and a locked form.
+ * ------------------------------------------------------------------
  */
 function paintProToggle(nodeId, spec) {
   const node = $(nodeId);
@@ -778,22 +790,25 @@ function paintPosture() {
 }
 
 /**
- * What is masked and what is not, listed rather than summarised.
- *
- * A posture control with no inventory under it reads as a promise about the
- * whole fingerprint, and this one covers four surfaces. Naming the rest, and
- * saying which of them cannot close at this tier at all, is the difference
- * between a tool somebody can reason about and one that quietly oversells.
+ * ------------------------------------------------------------------
+ *  Purpose  |  What is masked and what is not, listed rather than
+ *           |  summarised.
+ *  Note     |  A posture control with no inventory reads as a promise
+ *           |  about the whole fingerprint, but this covers four
+ *           |  surfaces. Naming the rest, and which cannot close at
+ *           |  this tier, is the difference between a tool you can
+ *           |  reason about and one that oversells.
+ * ------------------------------------------------------------------
  */
 /**
- * What each surface actually does, because they do different things.
- *
- * One line for all of them said "reads return a stable, seeded value", which is
- * true of three of them and false of the fourth: the navigator is normalised
- * rather than noised, and the half of it that matters most is not in the page at
- * all. A row that describes the wrong mechanism is worse than a row with no
- * description, because it is the screen telling somebody something untrue about
- * what they are running.
+ * ------------------------------------------------------------------
+ *  Purpose  |  What each surface actually does, because they differ.
+ *  Note     |  One line for all said "stable, seeded value", true of
+ *           |  three and false of the navigator, which is normalised
+ *           |  not noised, its most important half not in the page.
+ *           |  A row describing the wrong mechanism is worse than
+ *           |  none: the screen telling somebody something untrue.
+ * ------------------------------------------------------------------
  */
 const MASKED = {
   canvas: 'reads return a stable, seeded value',
@@ -835,9 +850,13 @@ function paintSurfaces() {
 // -------------------------------------------------------- blast radius
 
 /**
- * The three levels, described by what they do rather than by how alarming they
- * sound. "High" and "low" would leave the user guessing whether anything is
- * actually stopped, which is the one thing they need to know.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The three levels, described by what they do rather
+ *           |  than by how alarming they sound.
+ *  Note     |  "High" and "low" would leave the user guessing whether
+ *           |  anything is actually stopped, the one thing they need
+ *           |  to know.
+ * ------------------------------------------------------------------
  */
 const DANGER = [
   {
@@ -930,10 +949,14 @@ $('audit-clear')?.addEventListener('click', () =>
 );
 
 /**
- * Cookies are half an identity. This is the other half, and it is worth showing
- * plainly rather than assuming: a site that keeps its token in localStorage is
- * only isolated if the shim reached the page, and the honest failure is a tab
- * reading "shared" rather than a claim on a settings screen that it is not.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Cookies are half an identity; this is the other half,
+ *           |  shown plainly rather than assumed.
+ *  Note     |  A site keeping its token in localStorage is isolated
+ *           |  only if the shim reached the page, so the honest
+ *           |  failure is a tab reading "shared", not a settings-
+ *           |  screen claim that is untrue.
+ * ------------------------------------------------------------------
  */
 const STORAGE_MODES = {
   live: { title: 'Isolated', sub: 'reads and writes stay inside this session' },
@@ -1038,9 +1061,13 @@ $('storage-refresh')?.addEventListener('click', () =>
 );
 
 /**
- * The host is optional, so the interesting state is why it is not there. Each
- * reason has a different fix and saying "unavailable" for all of them is how
- * somebody spends an evening on a registry key.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The host is optional, so the interesting state is why
+ *           |  it is not there.
+ *  Note     |  Each reason has a different fix; saying "unavailable"
+ *           |  for all is how somebody spends an evening on a
+ *           |  registry key.
+ * ------------------------------------------------------------------
  */
 const NATIVE_REASONS = {
   absent: {
@@ -1147,13 +1174,16 @@ async function refresh() {
 }
 
 /**
- * The Pro tier, section 30. One block in Settings that reads the licence state
- * the worker computes and never verifies anything itself: it shows what is
- * unlocked, and on a Pro build lets a licence key be entered, moved between
- * devices, or removed. On a free build it is the honest roadmap, no purchase
- * button, because payment is not switched on until the isolation it sells has no
- * hole left. Everything degrades to the free product, so an absent or unreachable
- * licence server is not a broken screen, it is the free screen.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The Pro tier (section 30). One Settings block that
+ *           |  reads the licence state the worker computes.
+ *  How      |  Shows what is unlocked; a Pro build lets a key be
+ *           |  entered, moved between devices, or removed. A free
+ *           |  build shows the roadmap, no purchase button.
+ *  Note     |  Everything degrades to the free product, so an absent
+ *           |  or unreachable licence server is the free screen, not
+ *           |  a broken one.
+ * ------------------------------------------------------------------
  */
 const PRO_FEATURES = [
   ['idb_isolation', 'IndexedDB isolation', 'Each session gets its own IndexedDB, not just its own name.'],
@@ -1194,12 +1224,14 @@ function fmtDay(sec) {
 }
 
 /**
- * Cross-device sync, the Pro `sync` feature, in its own block.
- *
- * Honest about the two things that matter: only the structure syncs, not the
- * logins, and the passphrase is the key, so losing it loses the ability to read
- * the blob. Shown only where it can matter (dev, or a Pro build), locked with a
- * Pro chip otherwise.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Cross-device sync, the Pro sync feature, in its own
+ *           |  block.
+ *  Note     |  Honest about two things: only the structure syncs, not
+ *           |  the logins, and the passphrase is the key, so losing
+ *           |  it loses the blob. Shown only on a dev or Pro build,
+ *           |  locked with a Pro chip otherwise.
+ * ------------------------------------------------------------------
  */
 function paintSync() {
   const node = $('sync');
@@ -1530,11 +1562,13 @@ function paintPro() {
 }
 
 /**
- * Who else was on the page, grouped by the session that saw them.
- *
- * Read from the state payload rather than fetched separately, because the whole
- * point is that this sits next to the control it justifies: the setting and the
- * evidence for it should never be able to disagree.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Who else was on the page, grouped by the session that
+ *           |  saw them.
+ *  Note     |  Read from the state payload, not fetched separately,
+ *           |  so the setting and the evidence for it sit together
+ *           |  and cannot disagree.
+ * ------------------------------------------------------------------
  */
 function paintThirdParties() {
   const node = $('thirdparty');
@@ -1685,9 +1719,13 @@ $('tp-clear')?.addEventListener('click', () =>
 // ------------------------------------------------------------------ sheets
 
 /**
- * One trap for every sheet. A modal that lets focus wander back into the page
- * behind it is a modal in appearance only, and Escape has to work from
- * anywhere inside it including a text field.
+ * ------------------------------------------------------------------
+ *  Purpose  |  One focus trap for every sheet.
+ *  Note     |  A modal that lets focus wander back into the page
+ *           |  behind it is a modal in appearance only, and Escape
+ *           |  has to work from anywhere inside it, a text field
+ *           |  included.
+ * ------------------------------------------------------------------
  */
 let openSheetId = null;
 let sheetReturn = null;
@@ -1770,12 +1808,13 @@ function paintNewDanger() {
 }
 
 /**
- * Which open tabs to fold into the session being created, by tab id.
- *
- * Picking a tab here is the fast path that the pinned-domain field is the slow
- * one for: instead of typing vercel.com you tick the vercel tab you already
- * have open, and on create it is moved into the session and its domain pinned,
- * so the thing you were looking at simply belongs to the session now.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Which open tabs to fold into the session being
+ *           |  created, by tab id.
+ *  How      |  The fast path the pinned-domain field is the slow one
+ *           |  for: tick an open tab instead of typing its domain,
+ *           |  and on create it is moved in and its domain pinned.
+ * ------------------------------------------------------------------
  */
 const newTabs = new Set();
 
@@ -1861,12 +1900,14 @@ $('sheet-create')?.addEventListener('click', () =>
 );
 
 /**
- * Open a site signed in as a chosen session.
- *
- * A small prompt rather than a jump straight to a fixed site, because the whole
- * point is that the session is empty and the user decides who to sign in as. It
- * takes any address; the worker pins the domain and opens a tab already in the
- * session so the first request is already the right identity.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Open a site signed in as a chosen session.
+ *  How      |  A small prompt, not a jump to a fixed site, since the
+ *           |  session is empty and the user decides who to be. Takes
+ *           |  any address; the worker pins the domain and opens a
+ *           |  tab already in the session, so the first request is
+ *           |  the right identity.
+ * ------------------------------------------------------------------
  */
 let signingInto = null;
 
@@ -1912,10 +1953,12 @@ let editDanger = 'warn';
 const editTabs = new Set();
 
 /**
- * The same fast path the new-session sheet offers, on an existing session: tick
- * an open tab to pull it in rather than typing its domain. Only tabs that are
- * not already in this session are offered, because adding one already here is a
- * no-op that would only be confusing.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The new-session sheet's fast path, on an existing
+ *           |  session: tick an open tab to pull it in.
+ *  Note     |  Only tabs not already in this session are offered;
+ *           |  adding one already here is a confusing no-op.
+ * ------------------------------------------------------------------
  */
 function paintEditTabs() {
   const node = $('edit-tabs');
@@ -2017,13 +2060,15 @@ $('edit-save')?.addEventListener('click', () =>
 );
 
 /**
- * Per-session cookie backup: export the jar to a file, import one back.
- *
- * The deliberate counterpart to sync, which never carries the jars. Export builds
- * the file in the popup from the snapshot the worker hands back; import reads a
- * file the user picked and sends it to the worker to merge. Both are honest in the
- * note beside them about what a backup holds and what a device-bound login will
- * not do.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Per-session cookie backup: export the jar to a file,
+ *           |  import one back.
+ *  How      |  The counterpart to sync, which never carries jars.
+ *           |  Export builds the file from the worker's snapshot;
+ *           |  import sends a picked file to the worker to merge.
+ *  Note     |  The note beside them is honest about what a backup
+ *           |  holds and what a device-bound login will not do.
+ * ------------------------------------------------------------------
  */
 $('edit-export')?.addEventListener('click', () =>
   busy($('edit-export'), 'Exporting', async () => {
@@ -2078,11 +2123,15 @@ function selectedCandidates() {
 }
 
 /**
- * Rules a selection would compile to, mirrored from the compiler: four per
- * host, four per registrable fallback, plus the catch-all. Four because a top
- * level navigation compiles to two rules, split on whether the method is safe.
- * Shown before the session exists, because the alternative is a session that
- * silently drops hosts once it is too late to choose differently.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rules a selection would compile to, mirrored from the
+ *           |  compiler: four per host, four per fallback, plus the
+ *           |  catch-all.
+ *  How      |  Four because a top-level navigation compiles to two
+ *           |  rules, split on whether the method is safe.
+ *  Note     |  Shown before the session exists; the alternative is a
+ *           |  session that silently drops hosts too late to change.
+ * ------------------------------------------------------------------
  */
 const RULES_PER_HOST = 4;
 
@@ -2326,9 +2375,12 @@ $('copy')?.addEventListener('click', () =>
 );
 
 /**
- * The popup hands off here for anything that needs room. Opening straight into
- * the sheet is the difference between being sent to a settings page and being
- * carried on with what you asked for.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The popup hands off here for anything that needs room.
+ *  Note     |  Opening straight into the sheet is the difference
+ *           |  between being sent to a settings page and being
+ *           |  carried on with what you asked for.
+ * ------------------------------------------------------------------
  */
 refresh().then(() => {
   if (location.hash === '#new') $('new-session')?.click();

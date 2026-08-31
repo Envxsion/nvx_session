@@ -1,12 +1,15 @@
 /**
- * Drives the native host the way the browser does.
- *
- * Unit tests cover the framing. They cannot cover whether the host actually
- * starts, whether the operating system's credential store is reachable, or
- * whether a key survives being wrapped and unwrapped, and those are the parts
- * that differ per machine.
- *
- *   node tools/native-check.mjs
+ * ------------------------------------------------------------------
+ *  Title    |  Native host check
+ *  Ref      |  native/host.mjs, protocol.mjs
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Drives the native host the way the browser does.
+ *  Note     |  Unit tests cover framing but not whether the host
+ *           |  starts, the OS credential store is reachable, or a key
+ *           |  survives a wrap and unwrap. Those differ per machine.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';

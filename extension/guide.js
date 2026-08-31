@@ -1,17 +1,19 @@
 /**
- * The guide, rendered.
- *
- * Two entry points over one array. `renderGuideFull` fills the page at
- * `guide.html`; `renderGuidePopup` fills the popup's Guide view with the same
- * chapters as a stack that opens one at a time. Both read `NVX_GUIDE` from
- * `guide-data.js`, which is the only place the content exists.
- *
- * The figures are trusted markup and everything else is not. A chapter's text
- * goes in through `textContent`, always, even though it is written by hand in a
- * file in this repository: the moment a rule is "safe here because I wrote it",
- * the next person to add a chapter has to know that. The SVG is the one
- * exception and it is set through a template element rather than innerHTML on a
- * live node, so a malformed figure cannot half-apply to the document.
+ * ------------------------------------------------------------------
+ *  Title    |  The guide, rendered
+ *  Ref      |  guide-data.js (NVX_GUIDE), guide.html
+ *  ID       |  M6 (popup UI)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Render the guide as a full page and as a popup stack
+ *           |  from one array.
+ *  How      |  renderGuideFull fills guide.html; renderGuidePopup
+ *           |  fills the popup's Guide view with the same chapters,
+ *           |  opening one at a time.
+ *  Note     |  Text goes in through textContent, always; only the SVG
+ *           |  figure is trusted, set via a template element so a
+ *           |  malformed figure cannot half-apply to the document.
+ *  Author   |  Ojas Kekre, 18/08/2026
+ * ------------------------------------------------------------------
  */
 
 /* node() is el() from base.js under a name that does not collide with the
@@ -117,11 +119,12 @@ function renderGuideFull(root) {
 // -------------------------------------------------------------- the popup
 
 /**
- * The same chapters, collapsed.
- *
- * Rendered once and left in the DOM rather than rebuilt when the view opens,
- * because rebuilding would close every chapter the reader had opened, and the
- * popup is reopened constantly.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The same chapters, collapsed.
+ *  Note     |  Rendered once and left in the DOM, not rebuilt when the
+ *           |  view opens: rebuilding would close every chapter the
+ *           |  reader had opened, and the popup is reopened constantly.
+ * ------------------------------------------------------------------
  */
 function renderGuidePopup(mount) {
   if (!mount || mount.dataset.built === '1') return;

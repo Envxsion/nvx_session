@@ -1,16 +1,19 @@
 /**
- * Does "Sign in here" put a tab into a session before it makes a request.
- *
- * This is the safe path for adding an account, and safe means one thing
- * precisely: the binding and the session's rules are in place before the first
- * request leaves, so a federated provider never sees a half-finished login and
- * never signs the account out. The check is that shape. Open a site into a
- * fresh session, then read whether the tab was bound, whether the domain was
- * pinned so the account sticks, and whether the session's rules already cover
- * the tab.
- *
- *   node tools/fixture/server.mjs
- *   node tools/signin.mjs
+ * ------------------------------------------------------------------
+ *  Title    |  Sign in here probe
+ *  Ref      |  fixture/server.mjs, openInSession, bind
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether "Sign in here" binds a tab to a session before
+ *           |  it makes a request.
+ *  How      |  Open a site into a fresh session, then read that the
+ *           |  tab is bound, the domain is pinned, and the session's
+ *           |  rules already cover the tab.
+ *  Note     |  Safe means the binding and rules land before the first
+ *           |  request, so a federated provider never sees a
+ *           |  half-finished login.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';

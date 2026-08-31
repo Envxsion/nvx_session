@@ -1,16 +1,18 @@
 /**
- * NVX Capability Probe.
- *
- * Presence checks lie. An API can exist on an object and still no-op, reject
- * the one option that matters, or silently ignore a condition. Every probe
- * here therefore calls the real API with the exact shape NVX Session depends
- * on, and reports what actually came back.
- *
- * Verdicts:
- *   pass     the API did the thing
- *   fail     the API exists and refused, or did the wrong thing
- *   absent   the API is not present at all
- *   blocked  something external prevented a conclusive answer
+ * ------------------------------------------------------------------
+ *  Title    |  NVX capability probe
+ *  Ref      |  panel.js, inject-iso.js, inject-main.js, fixture
+ *  ID       |  M0 (capability probe)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Prove each API NVX Session depends on actually works,
+ *           |  not just that it is present.
+ *  How      |  Every probe calls the real API with the exact shape
+ *           |  NVX needs and reports what came back.
+ *  Note     |  Verdicts: pass, did the thing; fail, exists but
+ *           |  refused or did the wrong thing; absent, not present;
+ *           |  blocked, something external prevented an answer.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 
 const FIXTURE = 'http://localhost:8787';
@@ -43,9 +45,13 @@ async function clearRules(ids) {
 }
 
 /**
- * Adds one session rule, reports whether it survived, then removes it. This is
- * the only honest way to test a DNR feature: Chromium validates the whole rule
- * shape on insert, so a rejected option throws with a message naming it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Add one session rule, report whether it survived,
+ *           |  then remove it.
+ *  How      |  The only honest way to test a DNR feature: Chromium
+ *           |  validates the whole rule shape on insert, so a
+ *           |  rejected option throws with a message naming it.
+ * ------------------------------------------------------------------
  */
 async function tryRule(id, rule) {
   const full = { id, priority: 1, ...rule };
@@ -338,9 +344,12 @@ function waitForTab(tabId) {
 }
 
 /**
- * MV2 has no chrome.scripting, so the probe carries both paths. The MV2 form
- * takes the expression as source because tabs.executeScript cannot serialise a
- * function reference.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Read a value out of a tab across MV2 and MV3.
+ *  How      |  MV2 has no chrome.scripting, so both paths are carried.
+ *  Note     |  The MV2 form takes the expression as source, because
+ *           |  tabs.executeScript cannot serialise a function ref.
+ * ------------------------------------------------------------------
  */
 async function readTab(tabId, fn, mv2Expression) {
   if (chrome.scripting?.executeScript) {
@@ -357,9 +366,12 @@ async function readTab(tabId, fn, mv2Expression) {
 }
 
 /**
- * A tab reports complete before its document has necessarily produced the
- * attribute or body being read, so a single read races and returns null. Every
- * live probe reads through this.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Retry reading a tab until it yields a value.
+ *  Note     |  A tab reports complete before its document has made
+ *           |  the attribute or body being read, so a single read
+ *           |  races and returns null. Every live probe reads here.
+ * ------------------------------------------------------------------
  */
 async function readTabUntil(tabId, fn, tries = 15, waitMs = 200) {
   for (let i = 0; i < tries; i++) {
@@ -371,9 +383,12 @@ async function readTabUntil(tabId, fn, tries = 15, waitMs = 200) {
 }
 
 /**
- * Spike 1. Does a non-blocking observer still see Set-Cookie when a DNR rule
- * removes it? Four outcomes matter, and only one of them lets us both capture
- * and suppress with these two mechanisms alone.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Spike 1. Does a non-blocking observer still see
+ *           |  Set-Cookie when a DNR rule removes it?
+ *  Note     |  Four outcomes matter; only one lets us both capture
+ *           |  and suppress with these two mechanisms alone.
+ * ------------------------------------------------------------------
  */
 async function liveStripVersusObserve() {
   const stamp = Date.now();
@@ -453,8 +468,11 @@ async function liveStripVersusObserve() {
 }
 
 /**
- * The core bet. Does operation "set" on the Cookie request header actually
- * replace what the browser would have sent, scoped to one tab?
+ * ------------------------------------------------------------------
+ *  Purpose  |  The core bet. Does operation "set" on the Cookie
+ *           |  request header actually replace what the browser
+ *           |  would have sent, scoped to one tab?
+ * ------------------------------------------------------------------
  */
 async function liveCookieSubstitution() {
   const stamp = Date.now();
@@ -553,10 +571,14 @@ async function liveCookieSubstitution() {
 }
 
 /**
- * Opera keeps blocking webRequest available. Accepting a listener is not the
- * same as honouring its return value, so this rewrites the Cookie header for
- * real and checks what the origin received. If it passes, the second netfilter
- * backend closes both the service worker gap and the flush race.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rewrite the Cookie header for real via blocking
+ *           |  webRequest and check what the origin received.
+ *  Note     |  Opera keeps blocking webRequest, but accepting a
+ *           |  listener is not honouring its return value. A pass
+ *           |  means the second netfilter backend closes the service
+ *           |  worker gap and the flush race.
+ * ------------------------------------------------------------------
  */
 async function liveBlockingRewrite() {
   if (!chrome.webRequest?.onBeforeSendHeaders) {
@@ -619,10 +641,13 @@ async function liveBlockingRewrite() {
 }
 
 /**
- * Spike 3. Posture delivery path B depends on the ISOLATED world script
- * running before the MAIN world one at the same runAt. If MAIN wins, the
- * sessionStorage handshake cannot seed in time and per-tab posture on a
- * shared origin requires T2 unconditionally.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Spike 3. Does the ISOLATED world script run before
+ *           |  the MAIN world one at the same runAt?
+ *  Note     |  Path B needs it. If MAIN wins, the sessionStorage
+ *           |  handshake cannot seed in time and per-tab posture on
+ *           |  a shared origin requires T2 unconditionally.
+ * ------------------------------------------------------------------
  */
 async function liveInjectionOrder() {
   if (!chrome.scripting?.registerContentScripts) {
@@ -712,8 +737,11 @@ async function liveInjectionOrder() {
 }
 
 /**
- * The service worker gap. A request issued from a page service worker should
- * report tabId -1, which is why a tabIds rule cannot attribute it.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The service worker gap. A request from a page service
+ *           |  worker should report tabId -1.
+ *  Note     |  That is why a tabIds rule cannot attribute it.
+ * ------------------------------------------------------------------
  */
 async function liveServiceWorkerAttribution() {
   const seen = [];
@@ -750,13 +778,14 @@ async function liveServiceWorkerAttribution() {
 }
 
 /**
- * Can a rule attribute service worker traffic by matching tabIds [-1]?
- *
- * If it can, the mitigation in DESIGN.html section 07 gets much better. Rather
- * than blocking service workers everywhere, exactly one session per origin
- * owns the service worker and receives its traffic, and registration is
- * blocked only for the other sessions. Offline support survives for the
- * account you actually use.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Can a rule attribute service worker traffic by
+ *           |  matching tabIds [-1]?
+ *  Note     |  If so, DESIGN sec 07 improves: one session per origin
+ *           |  owns the worker and gets its traffic, registration is
+ *           |  blocked only for the others, and offline support
+ *           |  survives for the account you actually use.
+ * ------------------------------------------------------------------
  */
 async function liveServiceWorkerOwnership() {
   if (!chrome.declarativeNetRequest?.updateSessionRules) {
@@ -814,10 +843,13 @@ async function liveServiceWorkerOwnership() {
 }
 
 /**
- * Can the debugger attach to a service worker target directly, and intercept
- * its requests there? The infobar is a per-tab affordance, so attaching to a
- * worker target rather than a page may buy T2 quality interception without the
- * visible cost that makes T2 opt-in.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Can the debugger attach to a service worker target
+ *           |  directly and intercept its requests there?
+ *  Note     |  The infobar is per tab, so attaching to a worker
+ *           |  target may buy T2 quality interception without the
+ *           |  visible cost that makes T2 opt-in.
+ * ------------------------------------------------------------------
  */
 async function liveDebuggerOnServiceWorker() {
   if (!chrome.debugger) return { verdict: 'absent', detail: 'no chrome.debugger' };
@@ -984,12 +1016,14 @@ actionApi?.onClicked.addListener(() => {
 });
 
 /**
- * Unattended mode.
- *
- * When the probe is loaded into a throwaway profile by tools/run-probe.mjs
- * there is nobody to click anything, so it runs everything itself and posts
- * the report back to the fixture. Gated on the fixture answering, so a probe
- * loaded by hand into a real browser never phones anywhere.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Unattended mode: run every probe and post the report
+ *           |  back to the fixture with no clicks.
+ *  How      |  Loaded into a throwaway profile by tools/run-probe.mjs
+ *           |  there is nobody to click, so it runs itself.
+ *  Note     |  Gated on the fixture answering, so a probe loaded by
+ *           |  hand into a real browser never phones anywhere.
+ * ------------------------------------------------------------------
  */
 let autorunDone = false;
 

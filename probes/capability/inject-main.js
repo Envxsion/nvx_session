@@ -1,12 +1,15 @@
 /**
- * MAIN world, document_start.
- *
- * Stands in for the real mask bootstrap. Its only job in this probe is to
- * answer one question: by the time it runs, has the ISOLATED world already
- * left the config where it can be read synchronously?
- *
- * If this reports missing, delivery path B in DESIGN.html section 04 does not
- * work and per-tab posture on a shared origin requires the T2 tier.
+ * ------------------------------------------------------------------
+ *  Title    |  MAIN world handshake probe
+ *  Ref      |  inject-iso.js, background.js liveInjectionOrder
+ *  ID       |  M0 (capability probe)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Stand in for the mask bootstrap and answer one thing:
+ *           |  by the time MAIN runs, has ISOLATED left the config?
+ *  Note     |  If it reports missing, DESIGN sec 04 path B does not
+ *           |  work and per-tab posture on a shared origin needs T2.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 (() => {
   const el = document.documentElement;

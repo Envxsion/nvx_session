@@ -1,12 +1,18 @@
 /**
- * The M1 done criterion, run against the fixture origin.
- *
- * Two sessions, one window, one domain. Each tab must send only its own
- * cookies, the profile jar must never reach either, and the desync counter
- * must end at zero. This drives the real kernel inside a real browser through
- * the worker's diagnostic surface, so nothing here is simulated.
- *
- *   node tools/e2e.mjs opera
+ * ------------------------------------------------------------------
+ *  Title    |  The M1 done criterion
+ *  Ref      |  cdp.mjs, fixture, worker diagnostic surface
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  Prove two sessions in one window, one domain, stay
+ *           |  isolated, against the fixture origin.
+ *  How      |  Each tab sends only its own cookies, the profile jar
+ *           |  never reaches either, and the desync counter ends at
+ *           |  zero. Drives the real kernel in a real browser through
+ *           |  the worker's diagnostic surface, nothing simulated.
+ *  Note     |  node tools/e2e.mjs opera
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';

@@ -1,10 +1,15 @@
 /**
- * ISOLATED world, document_start.
- *
- * Stands in for the real seeder in DESIGN.html section 04 path B: resolve the
- * tab's config and leave it somewhere the MAIN world can read synchronously
- * before any page script runs. sessionStorage is per tab per origin by
- * specification, which is exactly the granularity per-tab posture needs.
+ * ------------------------------------------------------------------
+ *  Title    |  ISOLATED world seeder probe
+ *  Ref      |  inject-main.js, background.js liveInjectionOrder
+ *  ID       |  M0 (capability probe)
+ * ------------------------------------------------------------------
+ *  Purpose  |  Stand in for the real seeder, DESIGN sec 04 path B:
+ *           |  leave the tab config where MAIN can read it first.
+ *  How      |  document_start, ISOLATED world. sessionStorage is per
+ *           |  tab per origin by spec, the granularity posture needs.
+ *  Author   |  Ojas Kekre, 16/08/2026
+ * ------------------------------------------------------------------
  */
 (() => {
   const el = document.documentElement;

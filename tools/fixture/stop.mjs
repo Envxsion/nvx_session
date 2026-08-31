@@ -1,9 +1,15 @@
 /**
- * Stops the fixture, and only the fixture.
- *
- * Killing by process name would take out every node process on the machine,
- * including whatever else is running. This resolves the pid holding the port
- * and confirms it is answering as the fixture before touching it.
+ * ------------------------------------------------------------------
+ *  Title    |  Fixture stop
+ *  Ref      |  fixture/server.mjs
+ *  ID       |  fixture
+ * ------------------------------------------------------------------
+ *  Purpose  |  Stops the fixture, and only the fixture.
+ *  Note     |  Killing by process name would take out every node
+ *           |  process. This resolves the pid on the port and
+ *           |  confirms it answers as the fixture before touching it.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { execFileSync } from 'node:child_process';

@@ -1,17 +1,19 @@
 /**
- * What this does to a browser that was already being used.
- *
- * Every other suite starts from an empty profile, which is the one profile no
- * real installation ever has. This one builds the opposite: a jar holding
- * thousands of cookies across hundreds of registrable domains, fifty tabs open
- * across dozens of them, and then runs the install day path through it. What it
- * is looking for is not correctness, which the other suites cover, but the
- * costs that only appear with a zero on the end of them: a scan slow enough to
- * look broken, a rule budget quietly exhausted by the tenth session, a mirror
- * past its quota, a payload the popup has to rebuild twice a second.
- *
- *   node tools/fixture/server.mjs
- *   node tools/scale.mjs opera [--tabs=50] [--domains=400] [--keep]
+ * ------------------------------------------------------------------
+ *  Title    |  Scale probe
+ *  Ref      |  fixture/server.mjs, adoptScan, adopt
+ *  ID       |  tools
+ * ------------------------------------------------------------------
+ *  Purpose  |  What the extension does to a browser that was already
+ *           |  being used.
+ *  How      |  Builds a jar of thousands of cookies across hundreds
+ *           |  of domains with fifty tabs open, then runs the install
+ *           |  day path through it.
+ *  Note     |  Looks not for correctness but for costs that appear
+ *           |  only at scale: a slow scan, an exhausted rule budget, a
+ *           |  mirror past quota, a payload rebuilt twice a second.
+ *  Author   |  Ojas Kekre, 20/08/2026
+ * ------------------------------------------------------------------
  */
 
 import { spawn } from 'node:child_process';
@@ -26,13 +28,14 @@ const DIST = join(ROOT, 'dist');
 const FIXTURE = 'http://localhost:8787';
 
 /**
- * Synthetic hosts, each of which has to be its own registrable domain.
- *
- * The first version of this put four hundred subdomains under one zone, which
- * is one registrable domain, which is one candidate. It also tripped Chromium's
- * per-domain cookie cap and evicted all but a hundred and sixty of the twelve
- * hundred cookies it had just written. A used profile is wide, not deep, and
- * the difference is the whole point of the exercise.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Synthetic hosts, each its own registrable domain.
+ *  Bug-Fix  |  The first version put 400 subdomains under one zone,
+ *           |  which is one registrable domain and one candidate. It
+ *           |  also tripped Chromium's per-domain cookie cap and
+ *           |  evicted all but 160 of the 1200 cookies. A used
+ *           |  profile is wide, not deep.
+ * ------------------------------------------------------------------
  */
 const site = (n) => `www.nvx${n}.test`;
 const account = (kind, n) => `${kind}-nvxa${n}.test`;
@@ -238,11 +241,14 @@ console.log(`\nbuilding a used profile: ${DOMAINS} domains, ${TABS} tabs\n`);
 // ------------------------------------------------------------------ the jar
 
 /**
- * Seeded through the browser's own cookie store rather than injected into the
- * kernel, so what the scan reads is a real jar with real attributes. The shape
- * is drawn from what a used profile actually holds: mostly preference and
- * analytics cookies on domains nobody is signed into, a minority carrying a
- * readable identity, and a handful of accounts spread across sibling domains.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Seed through the browser's own cookie store, not the
+ *           |  kernel, so the scan reads a real jar with real
+ *           |  attributes.
+ *  Note     |  Shape drawn from a real profile: mostly preference and
+ *           |  analytics cookies, a minority with a readable identity,
+ *           |  a handful of accounts spread across sibling domains.
+ * ------------------------------------------------------------------
  */
 const seeded = await drive(
   `async () => {
@@ -377,9 +383,12 @@ check(
 // ---------------------------------------------------- adopting, in quantity
 
 /**
- * Driven from a page rather than the worker, because that is the only way to
- * reach the message API the setup screen actually uses. Adopting from the
- * inside would exercise a path the product does not have.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Drive from a page, not the worker, the only way to
+ *           |  reach the message API the setup screen uses.
+ *  Note     |  Adopting from the inside would exercise a path the
+ *           |  product does not have.
+ * ------------------------------------------------------------------
  */
 const pageTarget = await browser.send('Target.createTarget', {
   url: `chrome-extension://${loaded.id}/welcome.html`,
@@ -637,11 +646,13 @@ check(
 );
 
 /**
- * The default posture fabricates nothing and does not register a mask, so the
- * ordering that the whole persona feature rests on is not exercised by anything
- * above. Turned on here, at full profile size, because the registration is
- * rebuilt from every managed host and this is the only run where that list is
- * large.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Turn the mask on at full profile size to exercise the
+ *           |  ordering the persona feature rests on.
+ *  Note     |  The default posture fabricates nothing and registers
+ *           |  no mask, so nothing above exercises it. Registration is
+ *           |  rebuilt from every managed host, largest on this run.
+ * ------------------------------------------------------------------
  */
 const masked = await evaluate(
   `(async () => {
@@ -677,19 +688,17 @@ check(
 // ------------------------------------- the tabs that were open before any of it
 
 /**
- * The case this whole suite exists for.
- *
- * A content script can only enter a document as it loads, so the fifty tabs
- * that were already open when the extension arrived have no shim and no mask in
- * them, and never will until they are reloaded. The header rules have no such
- * limitation: they are installed on the host and apply to the next request from
- * any tab, including those ones. Under a posture that rewrites the user agent
- * that is a page reporting one browser while its own requests report another,
- * which is the exact incoherence the posture exists to prevent, arriving by the
- * one route the ordering guarantee inside the worker cannot cover.
- *
- * So it is measured from inside a tab that predates every session, against a
- * tab opened a moment ago, on the same host.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The case this whole suite exists for: tabs open before
+ *           |  the extension arrived.
+ *  How      |  Measured from inside a tab that predates every session,
+ *           |  against a tab opened a moment ago on the same host.
+ *  Note     |  A content script enters a document only as it loads, so
+ *           |  pre-existing tabs have no shim or mask until reloaded.
+ *           |  Header rules apply to their next request anyway, so a
+ *           |  posture rewriting the user agent makes the page report
+ *           |  one browser while its requests report another.
+ * ------------------------------------------------------------------
  */
 const oldTab = tabTargets[1];
 const oldSession = (
@@ -764,15 +773,15 @@ if (wasOpen.error || openedNow.error) {
 }
 
 /**
- * And the memory of which tabs those are has to outlive the worker.
- *
- * The set is non-empty exactly between a posture change and those tabs being
- * reloaded, which is exactly the period in which somebody changes a setting and
- * walks away, which is exactly how a manifest v3 worker reaches the thirty
- * seconds of quiet that ends it. In the heap that memory would be gone by the
- * time they came back and every one of those tabs would silently start lying
- * again. This empties the worker's copy the way an eviction does and puts back
- * only what the mirror holds.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The memory of which tabs predate the mask has to
+ *           |  outlive the worker.
+ *  Note     |  That set is non-empty exactly between a posture change
+ *           |  and a reload, which is when a v3 worker hits its thirty
+ *           |  seconds of quiet. In the heap it would be lost and the
+ *           |  tabs would start lying again. This empties the worker's
+ *           |  copy as an eviction does and restores from the mirror.
+ * ------------------------------------------------------------------
  */
 const survived = await drive(
   `async (nvx) => {
@@ -807,11 +816,13 @@ if (survived.error) {
 // -------------------------------------------------------- the off switch
 
 /**
- * The claim the pause makes is total: no rules, no rewriting, no picker, and
- * nothing lost. Every half of that is checked here, because a safety valve
- * nobody has pulled is a safety valve nobody knows the shape of, and this is
- * the one control somebody reaches for when they already believe the extension
- * has broken something.
+ * ------------------------------------------------------------------
+ *  Purpose  |  Check the pause claim in full: no rules, no rewriting,
+ *           |  no picker, and nothing lost.
+ *  Note     |  A safety valve nobody has pulled is one nobody knows
+ *           |  the shape of, and this is the control somebody reaches
+ *           |  for once they believe the extension broke something.
+ * ------------------------------------------------------------------
  */
 const paused = await evaluate(
   `(async () => {
@@ -886,15 +897,14 @@ if (paused.error) {
 // ------------------------------------------------- past every stated ceiling
 
 /**
- * The failures that cannot happen on a small profile.
- *
- * Everything above measured comfortable, which is the answer to whether this
- * survives a real browser but not to what it does when it stops fitting. The
- * posture covers a fixed number of hosts and a profile can exceed it, and a
- * host past that line keeps the mask and loses the matching headers, so the
- * page reports one browser while its requests report another. That is the exact
- * incoherence the posture exists to prevent, and until this run it was a
- * console warning in a service worker nobody has open.
+ * ------------------------------------------------------------------
+ *  Purpose  |  The failures that cannot happen on a small profile.
+ *  Note     |  The posture covers a fixed number of hosts and a
+ *           |  profile can exceed it. A host past that line keeps the
+ *           |  mask and loses the headers, so the page reports one
+ *           |  browser while its requests report another, until now
+ *           |  only a console warning in a worker nobody has open.
+ * ------------------------------------------------------------------
  */
 const past = await drive(
   `async (nvx) => {
