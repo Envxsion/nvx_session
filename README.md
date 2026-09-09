@@ -6,6 +6,11 @@ Sign into work in one tab and personal in the next. Both stay logged in. Neither
 can see the other. No profile switching, no incognito window that forgets you the
 second you close it, no second browser eating half your RAM.
 
+![License](https://img.shields.io/badge/license-GPL--3.0-2b6cb0)
+![Manifest](https://img.shields.io/badge/manifest-v3%20%2B%20v2-38a169)
+![Chromium](https://img.shields.io/badge/chromium-128%2B-4a5568)
+![RAM](https://img.shields.io/badge/RAM%20per%20account-~0%20MB-805ad5)
+
 Site and downloads: **[session.nvx.sh](https://session.nvx.sh)**
 
 ---
@@ -15,7 +20,7 @@ Site and downloads: **[session.nvx.sh](https://session.nvx.sh)**
 You're signed into your work Google and your personal Google at the same time. A
 coworker sends a calendar link. You click it.
 
-It opens as your *personal* account.
+> **It opens as your personal account.**
 
 Now you're requesting access to a doc you already own, or you reply from the wrong
 address before you catch it. Google picked a default for you, and it picked wrong,
@@ -115,9 +120,8 @@ failure this whole product exists to prevent.
 
 ## Using it
 
-The toolbar button is the whole product. It opens on **home**, which answers the
-one question worth asking mid-task: who am I on this tab, and can I be someone
-else?
+The toolbar button is the whole product. It opens on **home**: who this tab is
+signed in as right now, and a one-press switch to anyone else.
 
 - **Home:** the session this tab is in, and every session you could move it to.
   Press a row and the tab rebinds and reloads as that identity. Nothing reaches the
@@ -184,9 +188,18 @@ swap the browser's stored cookies in and out as you switch, which races the mome
 two tabs are busy at once. NVX never touches the stored jar. It rewrites the
 `Cookie` header on the request as it leaves and captures `Set-Cookie` on the way
 back, keeping each session's cookies in its own vault and out of the profile jar
-entirely. Managed and unmanaged tabs share the window and never see each other's
-identity.
+entirely.
 
+```mermaid
+flowchart LR
+    T["Managed tab<br/>(session: Work)"] -- request --> N(("NVX"))
+    N -- "Cookie: Work vault" --> S["The site"]
+    S -- "Set-Cookie" --> N
+    N -- "stored in" --> V[("Work vault")]
+    N -. "never reaches" .-> J[("Browser profile jar")]
+```
+
+Managed and unmanaged tabs share the window and never see each other's identity.
 The full design, every rule and edge case and honest limit, lives in the Pro
 repository's `DESIGN.html`. This README is the short version.
 
