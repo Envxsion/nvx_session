@@ -35,6 +35,12 @@ export interface EngineOptions extends CompileOptions {
   onReport?: (report: ApplyReport & { sessions: SessionId[] }) => void;
   onOverflow?: (sessionId: SessionId, domains: string[]) => void;
   /**
+   * How long a flush that had work took, and whether it landed. A callback
+   * rather than an import, so the kernel stays free of the telemetry module;
+   * the worker turns it into the daily perf rollup and the flush_failed fault.
+   */
+  onFlushed?: (ms: number, ok: boolean) => void;
+  /**
    * Whether to compile anything at all.
    *
    * False is the pause switch, and it is checked here rather than at the twenty
@@ -75,6 +81,10 @@ export class Engine {
   private patchCursor = 0;
   private readonly patchesInFlight = new Set<Promise<unknown>>();
   private lastBudget = 0;
+  /** Flushes started and not yet finished, so a caller can tell a race from a leak. */
+  private running = 0;
+  /** Rules each session compiled to on its last full compile. */
+  private readonly ruleCounts = new Map<SessionId, number>();
   /** Pending recompiles for rules that go stale on their own. */
   private readonly expiries = new Map<SessionId, { at: number; timer: ReturnType<typeof setTimeout> }>();
 
@@ -168,11 +178,40 @@ export class Engine {
       this.dirty.clear();
       this.firstDirtyAt = 0;
       if (!sessions.length) return;
-      await this.compileAndApply(sessions);
+      const startedAt = Date.now();
+      this.running += 1;
+      try {
+        await this.compileAndApply(sessions);
+        this.opts.onFlushed?.(Date.now() - startedAt, true);
+      } catch (e) {
+        this.opts.onFlushed?.(Date.now() - startedAt, false);
+        throw e;
+      } finally {
+        this.running -= 1;
+      }
     };
     const next = this.inFlight ? this.inFlight.then(run, run) : run();
     this.inFlight = next.catch(() => undefined);
     return next;
+  }
+
+  /** Whether rules are being written right now, by a flush or a fast-path patch. */
+  get busy(): boolean {
+    return this.running > 0 || this.patchesInFlight.size > 0 || this.dirty.size > 0;
+  }
+
+  /** Fast-path patch rules currently installed. */
+  get patchRules(): number {
+    let n = 0;
+    for (const list of this.patches.values()) for (const p of list) n += p.ids.length;
+    return n;
+  }
+
+  /** The most rules any one session compiled to, as of each session's last compile. */
+  get maxSessionRules(): number {
+    let n = 0;
+    for (const c of this.ruleCounts.values()) n = Math.max(n, c);
+    return n;
   }
 
   /**
@@ -235,11 +274,13 @@ export class Engine {
         // belong to anything, or that the user has just asked to be left alone.
         removeIds.push(...this.takePatches(id, Infinity));
         removeIds.push(...this.ids.releaseSession(id));
+        this.ruleCounts.delete(id);
         continue;
       }
 
       const { view, sessionOpts } = this.viewFor(id, session, compileOpts);
       const compiled = compileSession(view, this.ids, undefined, sessionOpts);
+      this.ruleCounts.set(id, compiled.rules.length);
       rules.push(...compiled.rules);
       removeIds.push(...compiled.removeIds);
 

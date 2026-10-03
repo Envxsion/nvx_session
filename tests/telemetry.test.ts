@@ -9,76 +9,41 @@
  *  Note     |  Feeds the text path an adversarial string (a URL, a
  *           |  domain, a cookie value) and asserts none survives into a
  *           |  payload. Both consent and a configured endpoint gate
- *           |  every send, and turning it off erases the one durable
- *           |  thing it kept.
+ *           |  every send, and turning it off erases what it kept. The
+ *           |  queue, batching and daily rollups are in
+ *           |  telemetry-queue.test.ts.
  *  Author   |  Ojas Kekre, 24/08/2026
  * ------------------------------------------------------------------
  */
 
 import { describe, expect, it } from 'vitest';
-import { Telemetry, bucket, daysBucket, cleanEnv, slug, TELEMETRY_ID_KEY } from '../src/kernel/telemetry.js';
-import type { TelemetryPorts } from '../src/kernel/telemetry.js';
+import {
+  Telemetry,
+  TELEMETRY_DAILY_KEY,
+  TELEMETRY_ID_KEY,
+  TELEMETRY_QUEUE_KEY,
+  TELEMETRY_SCHEMA,
+  bucket,
+  cleanEnv,
+  daysBucket,
+  isUuidV4,
+  slug,
+  uuidV4,
+} from '../src/kernel/telemetry.js';
+import { make, envelopes, ID_A, ID_B } from './telemetry-fakes.js';
 
-/** An in-memory storage area, the same shape the worker injects. */
-function fakeStorage(seed: Record<string, unknown> = {}) {
-  const map = new Map<string, unknown>(Object.entries(seed));
-  return {
-    area: {
-      get: async (keys: string | string[] | null) => {
-        const list = keys === null ? [...map.keys()] : Array.isArray(keys) ? keys : [keys];
-        const out: Record<string, unknown> = {};
-        for (const k of list) if (map.has(k)) out[k] = map.get(k);
-        return out;
-      },
-      set: async (items: Record<string, unknown>) => {
-        for (const [k, v] of Object.entries(items)) map.set(k, v);
-      },
-      remove: async (keys: string | string[]) => {
-        for (const k of Array.isArray(keys) ? keys : [keys]) map.delete(k);
-      },
-    },
-    map,
-  };
-}
-
-interface Sent {
-  url: string;
-  body: string;
-}
-
-/** A telemetry instance wired to fakes, plus the list of what it posted. */
-function make(opts: {
-  endpoint?: string | null;
-  consent?: boolean;
-  seed?: Record<string, unknown>;
-  postThrows?: boolean;
-  ids?: string[];
-} = {}) {
-  const sent: Sent[] = [];
-  const storage = fakeStorage(opts.seed);
-  let n = 0;
-  const ids = opts.ids ?? ['id-fixed'];
-  let clock = 1000;
-  let consent = opts.consent ?? true;
-  const ports: TelemetryPorts = {
-    storage: storage.area,
-    endpoint: () => (opts.endpoint === undefined ? 'https://ingest.example/t' : opts.endpoint),
-    consented: () => consent,
-    post: async (url, body) => {
-      if (opts.postThrows) throw new Error('network down');
-      sent.push({ url, body });
-    },
-    now: () => (clock += 1),
-    newId: () => ids[n++ % ids.length]!,
-  };
-  const t = new Telemetry(ports, { version: '1.2.3', mv: 3 });
-  return { t, sent, storage, setConsent: (v: boolean) => (consent = v) };
-}
-
-/** Every envelope across every posted batch, flattened. */
-function envelopes(sent: Sent[]) {
-  return sent.flatMap((s) => JSON.parse(s.body).batch as Array<Record<string, unknown>>);
-}
+const USAGE = {
+  sessions: 4,
+  tabs: 9,
+  sinceInstallDays: 20,
+  burners: 1,
+  maxSessionTabs: 5,
+  maxSessionRules: 120,
+  tier: 'free' as const,
+  posture: 'mirror' as const,
+  askNewSites: true,
+  quiet: 2,
+};
 
 describe('bucket coarsens a count', () => {
   it('maps counts to wide ranges and never returns the raw number', () => {
@@ -103,8 +68,7 @@ describe('slug strips a label to something that cannot identify', () => {
   });
 
   it('truncates hard so a long string cannot be smuggled through', () => {
-    const out = slug('a'.repeat(200));
-    expect(out.length).toBeLessThanOrEqual(40);
+    expect(slug('a'.repeat(200)).length).toBeLessThanOrEqual(40);
   });
 });
 
@@ -114,6 +78,7 @@ describe('both switches gate every send', () => {
     await t.ready();
     t.startup();
     t.sessionCreated(3);
+    t.count('replay_hop');
     await t.flush();
     expect(sent).toHaveLength(0);
   });
@@ -126,39 +91,44 @@ describe('both switches gate every send', () => {
     expect(sent).toHaveLength(0);
   });
 
-  it('never writes an install id when it is off', async () => {
+  it('writes nothing at all when it is off', async () => {
     const { t, storage } = make({ consent: false });
     await t.ready();
+    t.startup();
+    t.count('settle_wait');
+    t.timing('flush', 12);
+    await t.settled();
+    await t.flush();
     expect(storage.map.has(TELEMETRY_ID_KEY)).toBe(false);
+    expect(storage.map.has(TELEMETRY_QUEUE_KEY)).toBe(false);
+    expect(storage.map.has(TELEMETRY_DAILY_KEY)).toBe(false);
   });
 
-  it('sends when consented and configured', async () => {
+  it('sends when consented and configured, stamped with the wire version', async () => {
     const { t, sent } = make();
     await t.ready();
     t.startup();
     await t.flush();
-    expect(envelopes(sent).length).toBeGreaterThan(0);
-  });
-
-  it('stamps the wire-format version on every batch', async () => {
-    const { t, sent } = make();
-    await t.ready();
-    t.startup();
-    await t.flush();
-    expect(JSON.parse(sent[0]!.body).schema).toBe(2);
+    expect(envelopes(sent).length).toBe(1);
+    expect(TELEMETRY_SCHEMA).toBe(3);
+    expect(JSON.parse(sent[0]!.body).schema).toBe(3);
   });
 });
 
 describe('what goes out is an allowlist', () => {
-  it('carries the version and platform on every envelope', async () => {
-    const { t, sent } = make();
+  it('carries version, platform, channel and a sequence on every envelope', async () => {
+    const { t, sent } = make({ channel: 'dev' });
     await t.ready();
     t.startup();
+    t.sessionCreated(2);
     await t.flush();
-    for (const e of envelopes(sent)) {
+    const all = envelopes(sent);
+    expect(all.map((e) => e.seq)).toEqual([1, 2]);
+    for (const e of all) {
       expect(e.v).toBe('1.2.3');
       expect(e.mv).toBe(3);
-      expect(typeof e.id).toBe('string');
+      expect(e.channel).toBe('dev');
+      expect(isUuidV4(e.id)).toBe(true);
     }
   });
 
@@ -175,52 +145,83 @@ describe('what goes out is an allowlist', () => {
   it('destroys the structure a URL or cookie needs, even when one is forced in', async () => {
     const { t, sent } = make();
     await t.ready();
-    // error takes a closed enum; casting past the type is the "forced in" case.
-    // Even then the identifying structure, the dots, slashes, colon and query,
-    // cannot survive, so a URL or a dotted domain is not reconstructable.
     (t.error as (c: string) => void)('https://mail.google.com/inbox?SID=SECRETCOOKIEVALUE');
     await t.flush();
-    const category = String((envelopes(sent)[0]!.data as { category: unknown }).category);
+    const e = envelopes(sent)[0]!;
+    const category = String((e.data as { category: unknown }).category);
     expect(category).not.toMatch(/[./:?=]/);
     expect(category).not.toContain('mail.google.com');
     expect(category.length).toBeLessThanOrEqual(40);
-    expect(envelopes(sent)[0]!.event).toBe('error');
+    expect(e.event).toBe('error');
+  });
+
+  it('sends only the major.minor an update came from', async () => {
+    const { t, sent } = make();
+    await t.ready();
+    t.update('1.4.2.7');
+    t.update('not a version');
+    await t.flush();
+    expect(envelopes(sent).map((e) => e.data)).toEqual([{ from: '1.4' }, { from: '0.0' }]);
   });
 });
 
 describe('the install id', () => {
   it('is minted once and stays stable across events', async () => {
-    const { t, sent, storage } = make({ ids: ['first', 'second'] });
+    const { t, sent, storage } = make({ ids: [ID_A, ID_B] });
     await t.ready();
     t.startup();
     t.sessionCreated(1);
     await t.flush();
-    const ids = new Set(envelopes(sent).map((e) => e.id));
-    expect(ids).toEqual(new Set(['first']));
-    expect(storage.map.get(TELEMETRY_ID_KEY)).toBe('first');
+    expect(new Set(envelopes(sent).map((e) => e.id))).toEqual(new Set([ID_A]));
+    expect(storage.map.get(TELEMETRY_ID_KEY)).toBe(ID_A);
   });
 
-  it('reuses an id already in storage rather than minting a new one', async () => {
-    const { t, sent } = make({ seed: { [TELEMETRY_ID_KEY]: 'kept' }, ids: ['new'] });
+  it('reuses a valid id already in storage rather than minting a new one', async () => {
+    const { t, sent } = make({ seed: { [TELEMETRY_ID_KEY]: ID_B }, ids: [ID_A] });
     await t.ready();
     t.startup();
     await t.flush();
-    expect(envelopes(sent)[0]!.id).toBe('kept');
+    expect(envelopes(sent)[0]!.id).toBe(ID_B);
+  });
+
+  it('replaces a stored id that is not a UUID v4, and a minted one that is not either', async () => {
+    const { t, sent, storage } = make({ seed: { [TELEMETRY_ID_KEY]: 'lx1-abc' }, ids: ['not-a-uuid'] });
+    await t.ready();
+    t.startup();
+    await t.flush();
+    const id = envelopes(sent)[0]!.id;
+    expect(isUuidV4(id)).toBe(true);
+    expect(storage.map.get(TELEMETRY_ID_KEY)).toBe(id);
+  });
+
+  it('the fallback generator always makes a valid v4', () => {
+    for (let i = 0; i < 50; i++) expect(isUuidV4(uuidV4())).toBe(true);
+    expect(isUuidV4(uuidV4((b) => b.fill(255)))).toBe(true);
+    expect(isUuidV4(uuidV4((b) => b.fill(0)))).toBe(true);
   });
 });
 
 describe('turning it off unwrites what it kept', () => {
-  it('purge erases the id, and once off nothing more is sent', async () => {
-    const { t, sent, storage, setConsent } = make();
+  it('purge erases the id, the queue and the rollup, and once off nothing more is sent', async () => {
+    const { t, sent, storage, setConsent, fail } = make();
     await t.ready();
+    fail(503);
+    t.startup();
+    t.count('replay_hop');
+    await t.flush();
+    await t.settled();
     expect(storage.map.has(TELEMETRY_ID_KEY)).toBe(true);
+    expect(storage.map.has(TELEMETRY_QUEUE_KEY)).toBe(true);
+    expect(storage.map.has(TELEMETRY_DAILY_KEY)).toBe(true);
 
-    // The real sequence: the user turns telemetry off, which is what triggers
-    // purge in the worker.
     setConsent(false);
     await t.purge();
+    await t.settled();
     expect(storage.map.has(TELEMETRY_ID_KEY)).toBe(false);
+    expect(storage.map.has(TELEMETRY_QUEUE_KEY)).toBe(false);
+    expect(storage.map.has(TELEMETRY_DAILY_KEY)).toBe(false);
 
+    fail(204);
     const before = sent.length;
     t.startup();
     t.sessionCreated(2);
@@ -230,10 +231,18 @@ describe('turning it off unwrites what it kept', () => {
 });
 
 describe('telemetry never fails the product', () => {
-  it('swallows a network error and drops the batch', async () => {
+  it('swallows a network error', async () => {
     const { t } = make({ postThrows: true });
     await t.ready();
     t.startup();
+    await expect(t.flush()).resolves.toBeUndefined();
+  });
+
+  it('survives a storage area that throws on every call', async () => {
+    const { t } = make({ brokenStorage: true });
+    await t.ready();
+    t.startup();
+    t.count('settle_wait');
     await expect(t.flush()).resolves.toBeUndefined();
   });
 });
@@ -261,14 +270,7 @@ describe('cleanEnv forces the device profile onto the allowlist', () => {
       lang: 'EN-AU-loud',
       tz: 999,
     });
-    expect(junk.os).toBe('other');
-    expect(junk.arch).toBe('other');
-    expect(junk.browser).toBe('other');
-    expect(junk.browser_major).toBe(0);
-    // A region on the language is dropped, not sent.
-    expect(junk.lang).toBe('other');
-    // Timezone clamped to the real range.
-    expect(junk.tz).toBe(14);
+    expect(junk).toEqual({ os: 'other', arch: 'other', browser: 'other', browser_major: 0, lang: 'other', tz: 14 });
   });
 
   it('strips a region from a valid language', () => {
@@ -277,40 +279,58 @@ describe('cleanEnv forces the device profile onto the allowlist', () => {
   });
 });
 
-describe('the device profile rides only where it should', () => {
-  it('attaches env to install and startup, cleaned', async () => {
+describe('the device profile rides only on the daily beat', () => {
+  it('leaves install, update and startup with no env fields', async () => {
     const { t, sent } = make();
     t.setEnv({ os: 'macos', arch: 'arm64', browser: 'chrome', browser_major: 130, lang: 'de', tz: 1 });
     await t.ready();
+    t.install();
     t.startup();
     await t.flush();
-    expect(envelopes(sent)[0]!.data).toMatchObject({ os: 'macos', browser: 'chrome', browser_major: 130 });
+    expect(envelopes(sent).map((e) => e.data)).toEqual([{}, {}]);
   });
 
-  it('carries engagement and retention on the active beat, all bucketed', async () => {
+  it('carries a complete env, engagement and configuration on the beat, all bucketed', async () => {
     const { t, sent } = make();
     t.setEnv({ os: 'windows', arch: 'x86-64', browser: 'edge', browser_major: 120, lang: 'en', tz: -5 });
     await t.ready();
-    t.active({ sessions: bucket(4), tabs: bucket(9), since_install: daysBucket(20) });
+    t.active(USAGE);
     await t.flush();
     const e = envelopes(sent)[0]!;
     expect(e.event).toBe('active');
-    expect(e.data).toMatchObject({
+    expect(e.data).toEqual({
       os: 'windows',
+      arch: 'x86-64',
+      browser: 'edge',
+      browser_major: 120,
+      lang: 'en',
+      tz: -5,
       sessions: '4-6',
       tabs: '7-12',
       since_install: '8-30',
+      burners: '1',
+      max_session_tabs: '4-6',
+      max_session_rules: '100-249',
+      tier: 'free',
+      posture: 'mirror',
+      ask_new: true,
+      quiet: '2-3',
     });
-    // No raw numbers escaped through the buckets.
-    expect(JSON.stringify(e.data)).not.toContain('"9"');
-    expect(JSON.stringify(e.data)).not.toContain('"20"');
+    expect(JSON.stringify(e.data)).not.toMatch(/"(9|20|120)"/);
   });
 
-  it('sends no env fields when none was set', async () => {
+  it('still sends a complete, valid env when none could be read', async () => {
     const { t, sent } = make();
     await t.ready();
-    t.startup();
+    t.active(USAGE);
     await t.flush();
-    expect(envelopes(sent)[0]!.data).toEqual({});
+    expect(envelopes(sent)[0]!.data).toMatchObject({
+      os: 'other',
+      arch: 'other',
+      browser: 'other',
+      browser_major: 0,
+      lang: 'other',
+      tz: 0,
+    });
   });
 });
