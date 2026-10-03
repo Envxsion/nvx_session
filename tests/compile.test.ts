@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 import { parseSetCookie } from '../src/jar/cookie.js';
 import { isPublicSuffix } from '../src/jar/psl.js';
 import { CookieStore } from '../src/jar/store.js';
-import { compileDomain, compileSession, RuleIds, RULES_PER_SESSION } from '../src/netfilter/compile.js';
+import { compileDomain, compileSession, RuleIds, RULE_ID_STRIDE, RULES_PER_SESSION } from '../src/netfilter/compile.js';
 import type { SessionView } from '../src/netfilter/types.js';
 
 const NOW = 1_700_000_000_000;
@@ -54,7 +54,7 @@ describe('compileDomain', () => {
     // Four, not three: a top level navigation compiles to two rules, split on
     // whether the method is safe, because SameSite=Lax rides a cross-site
     // navigation only on GET and HEAD.
-    expect(out.rules).toHaveLength(4);
+    expect(out.rules).toHaveLength(5);
     for (const r of out.rules) {
       expect(r.condition.tabIds).toEqual([7]);
       expect(r.condition.requestDomains).toEqual(['vercel.com']);
@@ -110,7 +110,7 @@ describe('compileDomain', () => {
   it('REMOVES the header when the session holds nothing, never omits the rule', () => {
     const s = session({ store: new CookieStore() });
     const out = compileDomain(s, 'vercel.com', counter(), { now: NOW });
-    expect(out.rules).toHaveLength(4);
+    expect(out.rules).toHaveLength(5);
     for (const r of out.rules) {
       expect(setValue(r as never)).toEqual({ header: 'cookie', operation: 'remove' });
     }
@@ -119,8 +119,8 @@ describe('compileDomain', () => {
   it('adds a tabIds [-1] rule set when the session owns the service worker', () => {
     const s = session({ serviceWorkerOrigins: ['https://vercel.com'] });
     const out = compileDomain(s, 'vercel.com', counter(), { now: NOW });
-    expect(out.rules).toHaveLength(8);
-    expect(out.rules.filter((r) => r.condition.tabIds?.includes(-1))).toHaveLength(4);
+    expect(out.rules).toHaveLength(10);
+    expect(out.rules.filter((r) => r.condition.tabIds?.includes(-1))).toHaveLength(5);
   });
 
   it('produces nothing when the session has no tabs and owns no worker', () => {
@@ -148,8 +148,8 @@ describe('compileDomain', () => {
     const deepRules = out.rules.filter((r) => r.condition.urlFilter?.includes('/teams/acme'));
     const rootRules = out.rules.filter((r) => !r.condition.urlFilter?.includes('/teams/acme'));
 
-    expect(deepRules.length).toBe(4);
-    expect(rootRules.length).toBe(4);
+    expect(deepRules.length).toBe(5);
+    expect(rootRules.length).toBe(5);
     expect(deepRules[0]!.priority).toBeGreaterThan(rootRules[0]!.priority);
     expect(setValue(deepRules[0] as never)?.value).toContain('deep=d');
     expect(setValue(rootRules[0] as never)?.value).not.toContain('deep=d');
@@ -183,7 +183,7 @@ describe('RuleIds', () => {
     const ids = new RuleIds();
     const a = ids.blockFor('a');
     const b = ids.blockFor('b');
-    expect(b.base - a.base).toBe(RULES_PER_SESSION);
+    expect(b.base - a.base).toBe(RULE_ID_STRIDE);
     expect(a.limit).toBeLessThanOrEqual(b.base);
   });
 
@@ -201,7 +201,80 @@ describe('RuleIds', () => {
   });
 });
 
+/**
+ * The per-host Cookie rules only, leaving out the two rules every session with a
+ * tab carries: the Set-Cookie strip and the unknown-site navigation rule.
+ */
+function cookieRules<T extends { action: unknown; condition: { requestDomains?: string[]; resourceTypes?: string[] } }>(
+  rules: T[]
+): T[] {
+  return rules.filter(
+    (r) =>
+      !(r.action as { responseHeaders?: unknown }).responseHeaders &&
+      !(r.condition.resourceTypes?.length === 1 && r.condition.resourceTypes[0] === 'main_frame' && !r.condition.requestDomains)
+  );
+}
+
 describe('compileSession', () => {
+  it('strips Set-Cookie from every response in the session\'s tabs', () => {
+    const out = compileSession(session({ activeHosts: ['vercel.com'] }), new RuleIds(), undefined, { now: NOW });
+    const strip = out.rules.filter((r) =>
+      (r.action as { responseHeaders?: Array<{ header: string; operation: string }> }).responseHeaders?.some(
+        (h) => h.header === 'set-cookie' && h.operation === 'remove'
+      )
+    );
+    expect(strip).toHaveLength(1);
+    expect(strip[0]!.condition.tabIds).toEqual([7]);
+    // Every request type, page loads included. Leaving resourceTypes out
+    // matches everything except main_frame, which is how navigations leaked.
+    expect(strip[0]!.condition.resourceTypes).toContain('main_frame');
+    expect(strip[0]!.condition.resourceTypes).toContain('xmlhttprequest');
+  });
+
+  it('sends a navigation to an unknown site with no cookies, below every host rule', () => {
+    const out = compileSession(session({ activeHosts: ['vercel.com'] }), new RuleIds(), undefined, { now: NOW });
+    const nav = out.rules.filter((r) => r.condition.resourceTypes?.length === 1 && r.condition.resourceTypes[0] === 'main_frame' && !r.condition.requestDomains);
+    expect(nav).toHaveLength(1);
+    expect(nav[0]!.condition.tabIds).toEqual([7]);
+    expect(setValue(nav[0] as never)).toEqual({ header: 'cookie', operation: 'remove' });
+    for (const r of out.rules.filter((x) => x.condition.requestDomains)) {
+      expect(r.priority).toBeGreaterThan(nav[0]!.priority);
+    }
+  });
+
+  it('anchors a path rule to scheme and host, and stops it at a path boundary', () => {
+    const st = store(['scoped=1; Path=/api', 'dir=1; Path=/docs/'], 'https://vercel.com/api/x');
+    const out = compileDomain(session({ store: st }), 'vercel.com', counter(), { now: NOW });
+    const filters = new Set(out.rules.map((r) => r.condition.urlFilter));
+    // /api matches /api, /api/x and /api?q, never /apiary or a subdomain.
+    expect(filters).toContain('|https://vercel.com/api^');
+    // A path ending in a slash already ends at a boundary.
+    expect(filters).toContain('|https://vercel.com/docs/');
+    expect([...filters].some((f) => f?.startsWith('||'))).toBe(false);
+  });
+
+  it('sends overflowed hosts nothing rather than the browser jar', () => {
+    const jar = new CookieStore();
+    for (let i = 0; i < 400; i++) {
+      const r = parseSetCookie('c=1', { url: new URL(`https://d${i}.com/`), now: NOW }, { isPublicSuffix, now: NOW });
+      if (r.ok) jar.upsert(r.cookie);
+    }
+    const out = compileSession(session({ store: jar, tabIds: [7] }), new RuleIds(), undefined, { now: NOW });
+    expect(out.overflowed.length).toBeGreaterThan(0);
+    const backstop = out.rules.find(
+      (r) => r.condition.requestDomains?.includes(out.overflowed[0]!) && r.priority === 1
+    );
+    expect(setValue(backstop as never)).toEqual({ header: 'cookie', operation: 'remove' });
+    expect(backstop!.condition.tabIds).toEqual([7]);
+    // And it fits: the whole block stays within the session's budget.
+    expect(out.rules.length).toBeLessThanOrEqual(RULES_PER_SESSION);
+  });
+
+  it('adds no Set-Cookie rule for a session with no tabs', () => {
+    const out = compileSession(session({ tabIds: [], activeHosts: [] }), new RuleIds(), undefined, { now: NOW });
+    expect(out.rules.some((r) => (r.action as { responseHeaders?: unknown }).responseHeaders)).toBe(false);
+  });
+
   it('compiles every domain and returns the removal set', () => {
     const s = new CookieStore();
     for (const [host, header] of [
@@ -213,9 +286,9 @@ describe('compileSession', () => {
     }
 
     const out = compileSession(session({ store: s }), new RuleIds(), undefined, { now: NOW });
-    // Each host gets three variants, plus three more for its registrable
-    // domain fallback. Two hosts therefore produce twelve rules.
-    expect(out.rules.length).toBe(16);
+    // Each host's variants, plus its registrable domain fallback's, plus the
+    // Set-Cookie strip and the unknown-site navigation rule.
+    expect(out.rules.length).toBe(22);
     expect(out.removeIds).toHaveLength(RULES_PER_SESSION);
     expect(out.overflowed).toEqual([]);
     expect(new Set(out.rules.map((r) => r.id)).size).toBe(out.rules.length);
@@ -333,6 +406,7 @@ describe('compileSession', () => {
     Array.isArray(r.condition.tabIds) &&
     !r.condition.requestDomains &&
     !r.condition.urlFilter &&
+    (r.condition.resourceTypes?.length ?? 0) > 1 &&
     !r.condition.domainType &&
     r.action.requestHeaders?.[0]?.header === 'cookie' &&
     r.action.requestHeaders[0].operation === 'remove';
@@ -457,8 +531,8 @@ describe('federated sign-in, the identity provider case', () => {
     const fresh = session({ store: new CookieStore(), activeHosts: ['monash.edu'] });
     const out = compileSession(fresh, new RuleIds(), undefined, { now: NOW });
 
-    expect(out.rules.length).toBeGreaterThan(0);
-    for (const r of out.rules) {
+    expect(cookieRules(out.rules).length).toBeGreaterThan(0);
+    for (const r of cookieRules(out.rules)) {
       expect(r.condition.requestDomains).toEqual(['monash.edu']);
       expect(setValue(r as never)).toEqual({ header: 'cookie', operation: 'remove' });
     }
@@ -472,13 +546,13 @@ describe('federated sign-in, the identity provider case', () => {
     const s = session({ store: st, activeHosts: ['learning.monash.edu'] });
     const out = compileSession(s, new RuleIds(), undefined, { now: NOW });
 
-    const idp = out.rules.filter((r) => r.condition.urlFilter?.includes('//identity.monash.edu'));
-    const learning = out.rules.filter((r) => r.condition.urlFilter?.includes('//learning.monash.edu'));
-    const fallback = out.rules.filter((r) => !r.condition.urlFilter);
+    const idp = cookieRules(out.rules).filter((r) => r.condition.urlFilter?.includes('//identity.monash.edu'));
+    const learning = cookieRules(out.rules).filter((r) => r.condition.urlFilter?.includes('//learning.monash.edu'));
+    const fallback = cookieRules(out.rules).filter((r) => !r.condition.urlFilter);
 
-    expect(idp.length).toBe(4);
-    expect(learning.length).toBe(4);
-    expect(fallback.length).toBe(4);
+    expect(idp.length).toBe(5);
+    expect(learning.length).toBe(5);
+    expect(fallback.length).toBe(5);
 
     const firstParty = (rs: typeof out.rules) =>
       setValue(rs.find((r) => r.condition.domainType === 'firstParty') as never);
@@ -501,7 +575,7 @@ describe('federated sign-in, the identity provider case', () => {
     const out = compileSession(s, new RuleIds(), undefined, { now: NOW });
 
     const firstParty = (pred: (r: (typeof out.rules)[number]) => boolean) =>
-      setValue(out.rules.find((r) => pred(r) && r.condition.domainType === 'firstParty') as never);
+      setValue(cookieRules(out.rules).find((r) => pred(r) && r.condition.domainType === 'firstParty') as never);
 
     expect(firstParty((r) => !r.condition.urlFilter)?.value).toContain('SHARED');
     expect(firstParty((r) => Boolean(r.condition.urlFilter?.includes('//learning.monash.edu')))?.value).toContain(
@@ -513,9 +587,9 @@ describe('federated sign-in, the identity provider case', () => {
     const s = session({ activeHosts: ['vercel.com'] });
     const out = compileSession(s, new RuleIds(), undefined, { now: NOW });
     // One host rule set and one fallback set, not two of either.
-    expect(out.rules).toHaveLength(8);
-    expect(out.rules.filter((r) => r.condition.urlFilter)).toHaveLength(4);
-    expect(out.rules.filter((r) => !r.condition.urlFilter)).toHaveLength(4);
+    expect(cookieRules(out.rules)).toHaveLength(10);
+    expect(cookieRules(out.rules).filter((r) => r.condition.urlFilter)).toHaveLength(5);
+    expect(cookieRules(out.rules).filter((r) => !r.condition.urlFilter)).toHaveLength(5);
   });
 
   it('keeps the apex host rule alongside its fallback', () => {
@@ -527,11 +601,11 @@ describe('federated sign-in, the identity provider case', () => {
     });
     const out = compileSession(s, new RuleIds(), undefined, { now: NOW });
 
-    const anchored = out.rules.filter((r) => r.condition.urlFilter?.startsWith('|https://vercel.com'));
-    const fallback = out.rules.filter((r) => !r.condition.urlFilter);
+    const anchored = cookieRules(out.rules).filter((r) => r.condition.urlFilter?.startsWith('|https://vercel.com'));
+    const fallback = cookieRules(out.rules).filter((r) => !r.condition.urlFilter);
 
-    expect(anchored).toHaveLength(4);
-    expect(fallback).toHaveLength(4);
+    expect(anchored).toHaveLength(5);
+    expect(fallback).toHaveLength(5);
 
     const firstParty = (rs: typeof out.rules) =>
       setValue(rs.find((r) => r.condition.domainType === 'firstParty') as never);
@@ -544,12 +618,12 @@ describe('federated sign-in, the identity provider case', () => {
     const s = session({ activeHosts: ['vercel.com'] });
     const out = compileSession(s, new RuleIds(), undefined, { now: NOW, strict: true });
 
-    const catchAll = out.rules.filter((r) => !r.condition.requestDomains);
+    const catchAll = cookieRules(out.rules).filter((r) => !r.condition.requestDomains);
     expect(catchAll).toHaveLength(1);
     expect(catchAll[0]!.condition.tabIds).toEqual([7]);
     expect(setValue(catchAll[0] as never)).toEqual({ header: 'cookie', operation: 'remove' });
 
-    for (const r of out.rules.filter((x) => x.condition.requestDomains)) {
+    for (const r of cookieRules(out.rules).filter((x) => x.condition.requestDomains)) {
       expect(r.priority).toBeGreaterThan(catchAll[0]!.priority);
     }
   });
@@ -557,7 +631,7 @@ describe('federated sign-in, the identity provider case', () => {
   it('emits no catch-all when strict is off', () => {
     const s = session({ activeHosts: ['vercel.com'] });
     const out = compileSession(s, new RuleIds(), undefined, { now: NOW });
-    expect(out.rules.every((r) => r.condition.requestDomains)).toBe(true);
+    expect(cookieRules(out.rules).every((r) => r.condition.requestDomains)).toBe(true);
   });
 });
 
@@ -571,8 +645,22 @@ describe('federated sign-in, the identity provider case', () => {
  */
 describe('the Lax unsafe window, through the compiler', () => {
   const jar = () => store(['MDL_SSP_SessID=SSP_1; Secure'], 'https://vercel.com/');
-  const unsafe = (rules: { condition: { requestMethods?: string[] } }[]) =>
-    rules.find((r) => r.condition.requestMethods?.includes('post'));
+  // The cross-site POST: a POST from the site itself carries everything and is
+  // not on borrowed time.
+  const unsafe = (rules: { condition: { requestMethods?: string[]; domainType?: string } }[]) =>
+    rules.find((r) => r.condition.requestMethods?.includes('post') && r.condition.domainType === 'thirdParty');
+
+  it('carries every cookie on a same-site POST, with no window', () => {
+    const strictJar = store(['sid=S; SameSite=Strict', 'csrf=C; SameSite=Lax'], 'https://vercel.com/');
+    const out = compileDomain(session({ store: strictJar }), 'vercel.com', counter(), { now: NOW + 600_000 });
+    const sameSite = out.rules.find(
+      (r) => r.condition.requestMethods?.includes('post') && r.condition.domainType === 'firstParty'
+    );
+    expect(setValue(sameSite as never)?.value).toContain('sid=S');
+    expect(setValue(sameSite as never)?.value).toContain('csrf=C');
+    // And the cross-site POST still withholds them, as the browser would.
+    expect(setValue(unsafe(out.rules) as never)).toEqual({ header: 'cookie', operation: 'remove' });
+  });
 
   it('carries a fresh state cookie on the cross-site POST rule', () => {
     const out = compileDomain(session({ store: jar() }), 'vercel.com', counter(), { now: NOW });
@@ -609,5 +697,77 @@ describe('the Lax unsafe window, through the compiler', () => {
     }
     const out = compileSession(session({ store: s }), new RuleIds(), undefined, { now: NOW + 1000 });
     expect(out.expiresAt).toBe(NOW + 120_000);
+  });
+});
+
+describe('path rules stay on the host a cookie reaches', () => {
+  it('does not give a sibling host rules for paths only another host uses', () => {
+    const s = new CookieStore();
+    for (const [h, url] of [
+      ['GMAIL_LF=1; Path=/mail/u/0', 'https://mail.google.com/mail/u/0/'],
+      ['__utma=1; Domain=workspace.google.com; Path=/intl/en-US/gmail/', 'https://workspace.google.com/intl/en-US/gmail/'],
+      ['LSID=1; Path=/', 'https://accounts.google.com/'],
+    ] as const) {
+      const r = parseSetCookie(h, { url: new URL(url), now: NOW }, { isPublicSuffix, now: NOW });
+      if (!r.ok) throw new Error(r.reason);
+      s.upsert(r.cookie);
+    }
+    const out = compileSession(
+      session({ store: s, activeHosts: ['accounts.google.com'] }),
+      new RuleIds(),
+      undefined,
+      { now: NOW }
+    );
+    const filters = out.rules.map((r) => r.condition.urlFilter ?? '');
+    expect(filters.some((f) => f.startsWith('|https://accounts.google.com/'))).toBe(false);
+    expect(filters.some((f) => f.startsWith('|https://mail.google.com/mail/u/0'))).toBe(true);
+  });
+});
+
+describe('what a managed tab never hands the browser', () => {
+  it('never lets a sign-in provider through as an allowed third party', () => {
+    const out = compileSession(
+      session({ blockThirdParty: true, allowedParties: ['google.com', 'microsoftonline.com', 'cdn.example'] }),
+      new RuleIds(),
+      undefined,
+      { now: NOW }
+    );
+    const tp = out.rules.find((r) => r.condition.domainType === 'thirdParty' && !r.condition.urlFilter && !r.condition.requestDomains);
+    expect(tp?.condition.excludedRequestDomains).toEqual(['cdn.example']);
+  });
+
+  it('strips the headers the browser would act on with the profile', () => {
+    const out = compileSession(session(), new RuleIds(), undefined, { now: NOW });
+    const strip = out.rules.find((r) => r.action.responseHeaders?.some((h) => h.header === 'set-cookie'));
+    const names = strip!.action.responseHeaders!.map((h) => h.header);
+    expect(names).toEqual(expect.arrayContaining(['secure-session-registration', 'google-accounts-signin']));
+  });
+});
+
+describe('fallbacks for deeper cookie domains', () => {
+  it('carries a .console.aws.amazon.com cookie to a console region nobody has visited', () => {
+    const s = new CookieStore();
+    for (const [h, url] of [
+      ['state=S; Domain=console.aws.amazon.com; Path=/; Secure', 'https://console.aws.amazon.com/'],
+      ['top=T; Domain=amazon.com; Path=/; Secure', 'https://www.amazon.com/'],
+    ] as const) {
+      const r = parseSetCookie(h, { url: new URL(url), now: NOW }, { isPublicSuffix, now: NOW });
+      if (!r.ok) throw new Error(r.reason);
+      s.upsert(r.cookie);
+    }
+    const out = compileSession(session({ store: s, activeHosts: ['console.aws.amazon.com'] }), new RuleIds(), undefined, { now: NOW });
+    const top = (d: string) =>
+      out.rules.filter(
+        (r) => r.condition.requestDomains?.[0] === d && r.condition.resourceTypes?.includes('main_frame') && !r.condition.urlFilter
+      );
+    const deep = top('console.aws.amazon.com');
+    const shallow = top('amazon.com');
+    expect(deep.length).toBeGreaterThan(0);
+    const value = deep[0]!.action.requestHeaders![0]!.value ?? '';
+    expect(value).toContain('state=S');
+    expect(value).toContain('top=T');
+    expect(deep[0]!.priority).toBeGreaterThan(shallow[0]!.priority);
+    const host = out.rules.find((r) => r.condition.urlFilter === '|https://console.aws.amazon.com^');
+    expect(host!.priority).toBeGreaterThan(deep[0]!.priority);
   });
 });

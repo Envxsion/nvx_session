@@ -45,6 +45,17 @@ import { canHaveSubdomains, registrableDomain } from '../jar/psl.js';
 export const RULES_PER_SESSION = 320;
 
 /**
+ * The id range each session's block spans, which is not its budget. Ids are
+ * free; only the count of installed rules is capped, and that cap is shared.
+ * So a block is wide enough for any budget a session can be given, and the
+ * engine decides the budget from how many sessions actually have tabs.
+ */
+export const RULE_ID_STRIDE = 4600;
+
+/** Rules left for cookies once persona, guard and the fast path have theirs. */
+export const COOKIE_RULE_POOL = 4400;
+
+/**
  * ------------------------------------------------------------------
  *  Purpose  |  How many rules one host costs.
  *  Note     |  Exported so the adoption estimate tracks it exactly; a
@@ -52,7 +63,7 @@ export const RULES_PER_SESSION = 320;
  *           |  fit.
  * ------------------------------------------------------------------
  */
-export const RULES_PER_HOST = 4;
+export const RULES_PER_HOST = 5;
 export const RULE_ID_BASE = 1000;
 
 const VARIANTS: readonly EmitContext[] = ['first-party', 'third-party', 'top-level'];
@@ -76,13 +87,22 @@ interface Variant {
   methods?: string[];
   /** What to tell the jar, so its answer matches the condition above it. */
   method?: string;
+  /** Narrows a navigation to same-site or cross-site, as SameSite decides it. */
+  domainType?: 'firstParty' | 'thirdParty';
+  /** The context the jar answers for, when it differs from the condition's. */
+  emitAs?: EmitContext;
 }
 
 const RULE_VARIANTS: readonly Variant[] = [
   { context: 'first-party' },
   { context: 'third-party' },
   { context: 'top-level', methods: SAFE_METHODS, method: 'GET' },
-  { context: 'top-level', methods: UNSAFE_METHODS, method: 'POST' },
+  // A form POST to the site it came from is a same-site request, and carries
+  // every cookie, Lax and Strict included. Treating it as cross-site dropped
+  // the session and CSRF cookies of every Django, Rails and Laravel form on a
+  // managed tab. Only a POST from another site is held to SameSite.
+  { context: 'top-level', methods: UNSAFE_METHODS, method: 'POST', domainType: 'firstParty', emitAs: 'first-party' },
+  { context: 'top-level', methods: UNSAFE_METHODS, method: 'POST', domainType: 'thirdParty' },
 ];
 
 const SUBRESOURCE_TYPES: ResourceType[] = [
@@ -146,8 +166,26 @@ export class RuleIds {
     if (slot === undefined) return [];
     this.sessionSlots.delete(sessionId);
     this.freeSlots.push(slot);
-    const base = RULE_ID_BASE + slot * RULES_PER_SESSION;
-    return Array.from({ length: RULES_PER_SESSION }, (_, i) => base + i);
+    const base = RULE_ID_BASE + slot * RULE_ID_STRIDE;
+    const span = Math.max(this.used.get(slot) ?? 0, RULES_PER_SESSION);
+    this.used.delete(slot);
+    return Array.from({ length: span }, (_, i) => base + i);
+  }
+
+  /** How far into each block the last compile reached, so removals cover it. */
+  private readonly used = new Map<number, number>();
+
+  /**
+   * Every id the session's previous rules could hold, then the new reach
+   * recorded. A shrinking budget leaves rules past the new end, and those
+   * have to go in the same update.
+   */
+  span(sessionId: string, reached: number): number[] {
+    const slot = this.slotFor(sessionId);
+    const base = RULE_ID_BASE + slot * RULE_ID_STRIDE;
+    const span = Math.max(this.used.get(slot) ?? RULES_PER_SESSION, reached);
+    this.used.set(slot, reached);
+    return Array.from({ length: span }, (_, i) => base + i);
   }
 
   /** Sessions that can be tracked at once before the ceiling is reached. */
@@ -156,18 +194,19 @@ export class RuleIds {
   }
 
   /** Ids are assigned in compile order within a session's block. */
-  blockFor(sessionId: string): { base: number; limit: number } {
-    const base = RULE_ID_BASE + this.slotFor(sessionId) * RULES_PER_SESSION;
-    return { base, limit: base + RULES_PER_SESSION };
+  blockFor(sessionId: string, budget = RULES_PER_SESSION): { base: number; limit: number } {
+    const base = RULE_ID_BASE + this.slotFor(sessionId) * RULE_ID_STRIDE;
+    return { base, limit: base + Math.min(Math.max(budget, 1), RULE_ID_STRIDE) };
   }
 
   idsFor(sessionId: string): number[] {
     const { base } = this.blockFor(sessionId);
-    return Array.from({ length: RULES_PER_SESSION }, (_, i) => base + i);
+    const span = Math.max(this.used.get(this.slotFor(sessionId)) ?? 0, RULES_PER_SESSION);
+    return Array.from({ length: span }, (_, i) => base + i);
   }
 }
 
-function defaultScheme(domain: string): 'https:' | 'http:' {
+export function defaultScheme(domain: string): 'https:' | 'http:' {
   return domain === 'localhost' || domain.endsWith('.localhost') || domain === '127.0.0.1'
     ? 'http:'
     : 'https:';
@@ -182,6 +221,17 @@ function defaultScheme(domain: string): 'https:' | 'http:' {
  *           |  gets its own rule and priority resolves the overlap.
  * ------------------------------------------------------------------
  */
+/**
+ * Whether a cookie could ever be sent to this host. Path rules are drawn only
+ * from those: taking every path in the registrable domain gave each Google host
+ * a rule for Gmail's /mail/u/0 and the marketing site's /intl/en-US/gmail/,
+ * five variants apiece, which ran a signed-in Google session over its budget.
+ */
+function reaches(c: Cookie, host: string): boolean {
+  if (c.hostOnly) return c.domain === host;
+  return host === c.domain || host.endsWith(`.${c.domain}`);
+}
+
 function pathsFor(cookies: Cookie[]): string[] {
   const paths = new Set<string>(['/']);
   for (const c of cookies) paths.add(c.path);
@@ -216,10 +266,17 @@ function conditionFor(
     // . or %. That covers both the / of a default port and the : of an
     // explicit one, so the anchor survives http://host:8787 while still
     // refusing host.evil.com, where the next character is a dot.
+    //
+    // A path rule is anchored to its scheme and host as well, and ends at a path
+    // boundary: `||host/api` was a domain anchor, so it also matched every
+    // subdomain (tying with that subdomain's own rule), plain http (carrying
+    // Secure cookies in the clear), and `/apiary` for a cookie scoped to `/api`.
     base.urlFilter =
-      path === '/' ? `|${scheme}//${host}^` : `||${host}${path}`;
+      path === '/' ? `|${scheme}//${host}^` : `|${scheme}//${host}${pathEnd(path)}`;
   } else if (path !== '/') {
-    base.urlFilter = `||${host}${path}`;
+    // The fallback is for unvisited subdomains, so it keeps a subdomain wildcard;
+    // requestDomains above still confines it to this registrable domain.
+    base.urlFilter = `|${scheme}//*.${host}${pathEnd(path)}`;
   }
 
   switch (variant.context) {
@@ -232,8 +289,14 @@ function conditionFor(
         ...base,
         resourceTypes: ['main_frame'],
         ...(variant.methods ? { requestMethods: [...variant.methods] } : {}),
+        ...(variant.domainType ? { domainType: variant.domainType } : {}),
       };
   }
+}
+
+/** A cookie path as a urlFilter tail that stops at a path boundary, as the browser's match does. */
+function pathEnd(path: string): string {
+  return path.endsWith('/') ? path : `${path}^`;
 }
 
 /**
@@ -245,9 +308,18 @@ function conditionFor(
  *           |  the fallback's empty header and the sign-in is lost.
  * ------------------------------------------------------------------
  */
-function priorityFor(_host: string, path: string, isFallback: boolean): number {
-  if (isFallback) return path === '/' ? PRIORITY_FALLBACK : PRIORITY_FALLBACK + 1 + path.length;
-  return Math.min(path === '/' ? PRIORITY_HOST : PRIORITY_HOST + 1 + path.length, 1000);
+function priorityFor(host: string, path: string, isFallback: boolean): number {
+  if (isFallback) {
+    // A deeper fallback carries everything a shallower one does and more, so
+    // it wins where both match. Its path rules sit above every fallback root
+    // and below the host rules for the same path, which a visited host always
+    // has for any path a domain cookie reaching it carries.
+    const depth = Math.min(host.split('.').length - registrableDomain(host).split('.').length, FALLBACK_DEPTH_MAX);
+    return path === '/'
+      ? PRIORITY_FALLBACK + depth
+      : PRIORITY_FALLBACK + FALLBACK_DEPTH_MAX + 1 + depth + path.length;
+  }
+  return Math.min(path === '/' ? PRIORITY_HOST : PRIORITY_HOST + 1 + path.length, 1900);
 }
 
 /**
@@ -260,7 +332,16 @@ function priorityFor(_host: string, path: string, isFallback: boolean): number {
  */
 const PRIORITY_CATCH_ALL = 1;
 const PRIORITY_FALLBACK = 2;
-const PRIORITY_HOST = 4;
+const FALLBACK_DEPTH_MAX = 20;
+const PRIORITY_HOST = 50;
+
+/**
+ * Every request type, top level documents included. A rule that names no
+ * resource types matches everything EXCEPT main_frame, so a tab-wide rule
+ * without this silently skipped every page load. Found in the browser: the
+ * Set-Cookie strip held for fetches and missed navigations.
+ */
+const ALL_TYPES: ResourceType[] = ['main_frame', ...SUBRESOURCE_TYPES];
 
 /**
  * ------------------------------------------------------------------
@@ -278,7 +359,7 @@ function catchAllRule(tabIds: number[], id: number): Rule {
       type: 'modifyHeaders',
       requestHeaders: [{ header: 'cookie', operation: 'remove' }],
     },
-    condition: { tabIds },
+    condition: { tabIds, resourceTypes: ALL_TYPES },
   };
 }
 
@@ -292,12 +373,37 @@ function catchAllRule(tabIds: number[], id: number): Rule {
  *           |  identity provider still works, keeping SSO intact.
  * ------------------------------------------------------------------
  */
+/** Registrable domains whose job is signing people in. */
+const IDENTITY_PROVIDERS = new Set([
+  'google.com',
+  'youtube.com',
+  'microsoftonline.com',
+  'live.com',
+  'microsoft.com',
+  'okta.com',
+  'oktapreview.com',
+  'okta-emea.com',
+  'auth0.com',
+  'atlassian.com',
+  'apple.com',
+  'amazon.com',
+  'onelogin.com',
+  'duosecurity.com',
+  'pingidentity.com',
+  'pingone.com',
+  'facebook.com',
+  'github.com',
+]);
+
 function thirdPartyRule(tabIds: number[], id: number, allowed: string[] = []): Rule {
   // Excluded on the rule rather than answered by a higher priority one of its
   // own. An allowed party is not being given anything: it is being left exactly
   // as the browser would have it, which is one condition rather than a second
   // rule that has to out-rank this one and be kept in step with it.
-  const spared = [...new Set(allowed.filter(Boolean))].sort();
+  // Never a sign-in provider: an allowed party goes out with the browser's own
+  // cookies, and a silent token iframe (MSAL, Okta, Google) answered with the
+  // profile's account inside the session.
+  const spared = [...new Set(allowed.filter((d) => d && !IDENTITY_PROVIDERS.has(d)))].sort();
   return {
     id,
     priority: PRIORITY_CATCH_ALL,
@@ -332,7 +438,73 @@ function cacheRule(tabIds: number[], id: number): Rule {
       type: 'modifyHeaders',
       responseHeaders: [{ header: 'cache-control', operation: 'set', value: 'no-store' }],
     },
-    condition: { tabIds },
+    condition: { tabIds, resourceTypes: ALL_TYPES },
+  };
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  A managed tab arriving at a site its session has no rule
+ *           |  for arrives as the session, signed out, never as the
+ *           |  browser's own account.
+ *  How      |  Removes the Cookie header from top level navigations in
+ *           |  the session's tabs, at the bottom priority, so every
+ *           |  host the session knows keeps its own rule above it.
+ *  Why      |  The host rule for a brand new site is built when the
+ *           |  navigation starts, and a redirect to an identity provider
+ *           |  can leave before it lands. This rule is already there, so
+ *           |  that request carries nothing rather than the profile's
+ *           |  sign-in, which is the account mix-up the product exists
+ *           |  to prevent.
+ * ------------------------------------------------------------------
+ */
+function navigationRule(tabIds: number[], id: number): Rule {
+  return {
+    id,
+    priority: PRIORITY_CATCH_ALL,
+    action: {
+      type: 'modifyHeaders',
+      requestHeaders: [{ header: 'cookie', operation: 'remove' }],
+    },
+    condition: { tabIds, resourceTypes: ['main_frame'] },
+  };
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Keep every Set-Cookie a managed tab receives out of the
+ *           |  browser's own jar.
+ *  How      |  Removed from the response for the session's tabs. The
+ *           |  observer still reads it (a non-blocking listener with
+ *           |  extraHeaders sees the header a rule removes), so the
+ *           |  session store captures it and nothing else does.
+ *  Why      |  Left in, every session's cookies also landed in the
+ *           |  profile jar, last writer winning, so an unmanaged tab or
+ *           |  any request without a rule carried whichever account had
+ *           |  signed in most recently.
+ * ------------------------------------------------------------------
+ */
+function setCookieRule(tabIds: number[], id: number): Rule {
+  return {
+    id,
+    priority: PRIORITY_CATCH_ALL,
+    action: {
+      type: 'modifyHeaders',
+      responseHeaders: [
+        { header: 'set-cookie', operation: 'remove' },
+        // Headers the browser acts on with the profile's own state. Device
+        // bound session registration would bind the session's Google cookies
+        // to the profile, and the account consistency ones would add the
+        // session's account to Chrome's own sign-in, or sign the profile out.
+        { header: 'secure-session-registration', operation: 'remove' },
+        { header: 'sec-session-registration', operation: 'remove' },
+        { header: 'sec-session-challenge', operation: 'remove' },
+        { header: 'google-accounts-signin', operation: 'remove' },
+        { header: 'google-accounts-signout', operation: 'remove' },
+        { header: 'x-chrome-manage-accounts', operation: 'remove' },
+      ],
+    },
+    condition: { tabIds, resourceTypes: ALL_TYPES },
   };
 }
 
@@ -417,11 +589,12 @@ export function compileHost(
   const cookies = session.store.forDomain(registrable);
   let expiresAt: number | null = null;
 
-  for (const path of pathsFor(cookies)) {
+  for (const path of pathsFor(cookies.filter((c) => reaches(c, emitHost)))) {
     const url = new URL(`${scheme}//${emitHost}${path === '/' ? '/' : `${path}/`}`);
 
     for (const variant of RULE_VARIANTS) {
-      const result = emit(session.store, url, variant.context, {
+      const context = variant.emitAs ?? variant.context;
+      const result = emit(session.store, url, context, {
         now,
         ...(variant.method ? { method: variant.method } : {}),
         ...(opts.strictOnTopLevel !== undefined
@@ -434,7 +607,7 @@ export function compileHost(
       // Only the unsafe-method variant can be carrying a cookie on borrowed
       // time. Noting it here rather than scanning the jar keeps the expiry tied
       // to what actually went into a rule.
-      if (!isSafeMethod(variant.method)) {
+      if (context === 'top-level' && !isSafeMethod(variant.method)) {
         for (const c of result.included) {
           if (!withinLaxUnsafeWindow(c, now)) continue;
           const until = c.created + LAX_UNSAFE_WINDOW_MS;
@@ -508,7 +681,7 @@ export function compileSession(
   domains?: string[],
   opts: CompileOptions = {}
 ): CompiledSession {
-  const { base, limit } = ids.blockFor(session.id);
+  const { base, limit } = ids.blockFor(session.id, opts.budget);
   let cursor = base;
   const nextId = () => cursor++;
 
@@ -545,11 +718,27 @@ export function compileSession(
     const registrable = registrableDomain(h);
     if (canHaveSubdomains(registrable)) fallbacks.add(registrable);
   }
+  // And one per deeper domain a cookie is scoped to. A fallback for the
+  // registrable domain carries only what reaches any subdomain of it, so a
+  // cookie for .console.aws.amazon.com never reached a console region the
+  // session had not visited yet, and AWS's sign-in came back to one and
+  // answered "Unauthorized" for want of the state cookie it had just set.
+  if (!domains) {
+    for (const c of session.store.all()) {
+      if (c.hostOnly || !canHaveSubdomains(c.domain)) continue;
+      if (registrableDomain(c.domain) !== c.domain) fallbacks.add(c.domain);
+    }
+  }
 
   if (opts.strict && session.tabIds.length) {
     rules.push(catchAllRule([...session.tabIds], nextId()));
-  } else if (session.blockThirdParty && session.tabIds.length) {
-    rules.push(thirdPartyRule([...session.tabIds], nextId(), session.allowedParties ?? []));
+  } else if (session.tabIds.length) {
+    // Strict's catch-all already covers navigations; without it, they still get
+    // the narrower one, so a new site is never visited as the profile.
+    rules.push(navigationRule([...session.tabIds], nextId()));
+    if (session.blockThirdParty) {
+      rules.push(thirdPartyRule([...session.tabIds], nextId(), session.allowedParties ?? []));
+    }
   }
 
   // Independent of the cookie catch-all above, since it touches a response header
@@ -557,6 +746,12 @@ export function compileSession(
   // only ever drop a background host rule and never the cache suppression.
   if (opts.cacheIsolation && session.tabIds.length) {
     rules.push(cacheRule([...session.tabIds], nextId()));
+  }
+
+  // Ahead of the host rules for the same reason as the cache rule: an overflow
+  // may drop a background host, never the rule that keeps the jar clean.
+  if (session.tabIds.length) {
+    rules.push(setCookieRule([...session.tabIds], nextId()));
   }
 
   const targets: { host: string; fallback: boolean }[] = [
@@ -582,7 +777,7 @@ export function compileSession(
   const activeDomains = new Set([...active].map((h) => registrableDomain(h)));
   const rank = (t: { host: string; fallback: boolean }): number => {
     if (!t.fallback && active.has(t.host)) return 0;
-    if (t.fallback && activeDomains.has(t.host)) return 1;
+    if (t.fallback && activeDomains.has(registrableDomain(t.host))) return 1;
     return 2;
   };
   targets.sort((a, b) => rank(a) - rank(b));
@@ -595,7 +790,8 @@ export function compileSession(
     // means the set of shapes this has to survive is not enumerable in advance.
     try {
       const probe = compileHost(session, host, () => cursor, opts, fallback);
-      if (cursor + probe.rules.length > limit) {
+      // One slot is kept back for the overflow rule below.
+      if (cursor + probe.rules.length > limit - (session.tabIds.length ? 1 : 0)) {
         overflowed.push(host);
         continue;
       }
@@ -610,10 +806,23 @@ export function compileSession(
     }
   }
 
+  // A host that did not fit has no rule of its own, and a request with no rule
+  // carries the browser's own jar, which is another account. One rule in the
+  // reserved slot sends those hosts nothing instead, so a session that has
+  // outgrown its budget arrives at them signed out rather than as someone else.
+  if (overflowed.length && session.tabIds.length) {
+    rules.push({
+      id: nextId(),
+      priority: PRIORITY_CATCH_ALL,
+      action: { type: 'modifyHeaders', requestHeaders: [{ header: 'cookie', operation: 'remove' }] },
+      condition: { tabIds: [...session.tabIds], requestDomains: [...new Set(overflowed)], resourceTypes: ALL_TYPES },
+    });
+  }
+
   return {
     sessionId: session.id,
     rules,
-    removeIds: ids.idsFor(session.id),
+    removeIds: ids.span(session.id, cursor - base),
     overflowed,
     truncated,
     skipped,

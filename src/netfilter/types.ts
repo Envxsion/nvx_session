@@ -69,6 +69,8 @@ export interface SessionView {
 
 export interface CompileOptions {
   now?: number;
+  /** Rules this session may install; the engine shares the pool between sessions with tabs. */
+  budget?: number;
   strictOnTopLevel?: boolean;
   /**
    * Rules are compiled before any request exists, so the scheme has to be
@@ -184,5 +186,9 @@ export interface Netfilter {
   markDirty(sessions: Iterable<string>): void;
   flush(): Promise<void>;
   retire(sessionId: string): Promise<void>;
+  /** Fast path for a cookie just handed to a tab; optional, a no-op when blocking. */
+  patch?(sessionId: string, hosts: string[]): Promise<void>;
+  /** Resolves once every rule already owed is installed. */
+  settle?(): Promise<void>;
   readonly pending: number;
 }

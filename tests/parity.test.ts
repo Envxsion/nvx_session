@@ -54,7 +54,9 @@ function variantOf(rule: Rule): Variant {
 /** The path a compiled rule is scoped to, mirroring conditionFor. */
 function pathOf(rule: Rule, host: string): string {
   const filter = rule.condition.urlFilter ?? '';
-  const scoped = filter.match(new RegExp(`^\\|\\|${host.replace(/\./g, '\\.')}(/.*)$`));
+  // `|https://host/path^`, or `|https://host/path/` for a path ending in a
+  // slash; the host-wide rule is `|https://host^` and has no path at all.
+  const scoped = filter.match(new RegExp(`^\\|https?://${host.replace(/\./g, '\\.')}(/.*?)\\^?$`));
   return scoped ? scoped[1]! : '/';
 }
 

@@ -16,10 +16,16 @@
  * ------------------------------------------------------------------
  */
 
-import { compileSession, RuleIds } from '../netfilter/compile.js';
+import { compileHost, compileSession, COOKIE_RULE_POOL, defaultScheme, RULE_ID_STRIDE, RULES_PER_SESSION, RuleIds } from '../netfilter/compile.js';
 import type { CompileOptions, SessionView } from '../netfilter/types.js';
 import type { ApplyReport, DnrBackend } from '../netfilter/dnr.js';
 import { Registry, type SessionId } from './registry.js';
+
+/** Fast-path rule ids, far above every session block. */
+const PATCH_ID_BASE = 50_000_000;
+const PATCH_CAPACITY = 150;
+/** Above any host rule, whose priority tops out at 1000. */
+const PATCH_PRIORITY_LIFT = 2000;
 
 export interface EngineOptions extends CompileOptions {
   /** Trailing debounce. Long enough to absorb a page load's cookie burst. */
@@ -62,6 +68,13 @@ export class Engine {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private firstDirtyAt = 0;
   private inFlight: Promise<void> | null = null;
+  /** Rule ids a previous worker installed, withdrawn by the next flush. */
+  private readonly leftover: number[] = [];
+  /** Fast-path rules standing in for a host until the next full compile. */
+  private readonly patches = new Map<SessionId, { ids: number[]; at: number }[]>();
+  private patchCursor = 0;
+  private readonly patchesInFlight = new Set<Promise<unknown>>();
+  private lastBudget = 0;
   /** Pending recompiles for rules that go stale on their own. */
   private readonly expiries = new Map<SessionId, { at: number; timer: ReturnType<typeof setTimeout> }>();
 
@@ -162,6 +175,21 @@ export class Engine {
     return next;
   }
 
+  /**
+   * ------------------------------------------------------------------
+   *  Purpose  |  Withdraw rules a previous worker installed in the same
+   *           |  update that installs this worker's.
+   *  Why      |  Clearing them first and rebuilding a few awaits later
+   *           |  left every managed tab with no rule in between, and the
+   *           |  worker is usually woken by exactly the request that then
+   *           |  went out carrying the browser's own cookies. Removals and
+   *           |  additions in one update are atomic in the browser.
+   * ------------------------------------------------------------------
+   */
+  replaceOnNextFlush(ids: Iterable<number>): void {
+    this.leftover.push(...ids);
+  }
+
   private async compileAndApply(sessions: SessionId[]): Promise<void> {
     const rules = [];
     const removeIds: number[] = [];
@@ -169,7 +197,7 @@ export class Engine {
     const live = this.opts.enabled?.() ?? true;
     // Resolved once per flush, so every session in this batch compiles under the
     // same posture and a mid-flush change cannot split the batch.
-    const compileOpts: CompileOptions =
+    let compileOpts: CompileOptions =
       this.opts.strictWhen || this.opts.cacheWhen
         ? {
             ...this.opts,
@@ -178,27 +206,40 @@ export class Engine {
           }
         : this.opts;
 
+    // The pool is split between the sessions that have tabs, since a session
+    // with none installs nothing. A fixed share of 320 ran a session signed
+    // into Google, Microsoft and AWS out of rules, and the host dropped was the
+    // AWS console region its sign-in returned to. When the share changes,
+    // every session with tabs recompiles in this same update, so the total
+    // never passes the ceiling in between.
+    const withTabs = this.registry.listSessions().filter((s) => this.registry.tabsFor(s.id).length).map((s) => s.id);
+    const budget = Math.min(
+      Math.max(Math.floor(COOKIE_RULE_POOL / Math.max(withTabs.length, 1)), RULES_PER_SESSION),
+      RULE_ID_STRIDE
+    );
+    if (budget !== this.lastBudget) {
+      this.lastBudget = budget;
+      sessions = [...new Set([...sessions, ...withTabs])];
+    }
+    compileOpts = { ...compileOpts, budget };
+
+    const startedAt = Date.now();
     for (const id of sessions) {
+      // A full compile carries everything a patch carried, as long as it began
+      // after the patch's cookie was stored.
+      removeIds.push(...this.takePatches(id, startedAt));
       const session = live ? this.registry.getSession(id) : undefined;
       if (!session) {
         // Deleted mid-flight, or paused. Either way its rules must be
         // withdrawn, or they keep rewriting headers for tabs that no longer
         // belong to anything, or that the user has just asked to be left alone.
+        removeIds.push(...this.takePatches(id, Infinity));
         removeIds.push(...this.ids.releaseSession(id));
         continue;
       }
 
-      const view: SessionView = {
-        id,
-        tabIds: this.registry.tabsFor(id),
-        serviceWorkerOrigins: this.registry.serviceWorkerOriginsFor(id),
-        activeHosts: this.registry.hostsFor(id),
-        blockThirdParty: session.thirdParty === 'block',
-        allowedParties: session.allowedParties ?? [],
-        store: session.store,
-      };
-
-      const compiled = compileSession(view, this.ids, undefined, compileOpts);
+      const { view, sessionOpts } = this.viewFor(id, session, compileOpts);
+      const compiled = compileSession(view, this.ids, undefined, sessionOpts);
       rules.push(...compiled.rules);
       removeIds.push(...compiled.removeIds);
 
@@ -217,8 +258,102 @@ export class Engine {
       if (compiled.expiresAt !== null) this.expireAt(id, compiled.expiresAt);
     }
 
+    removeIds.push(...this.leftover.splice(0));
     const report = await this.backend.applyReporting(rules, removeIds);
     this.opts.onReport?.({ ...report, sessions });
+  }
+
+  private viewFor(
+    id: SessionId,
+    session: NonNullable<ReturnType<Registry['getSession']>>,
+    compileOpts: CompileOptions
+  ): { view: SessionView; sessionOpts: CompileOptions } {
+    const view: SessionView = {
+      id,
+      tabIds: this.registry.tabsFor(id),
+      // No worker rules. A managed page is refused a worker, so the only
+      // tabless traffic on an origin is the profile's, and a session's
+      // cookies on it leaked that session out of its tabs.
+      serviceWorkerOrigins: [],
+      activeHosts: this.registry.hostsFor(id),
+      blockThirdParty: session.thirdParty === 'block',
+      allowedParties: session.allowedParties ?? [],
+      store: session.store,
+    };
+    // A host this session is on over plain http gets http-anchored rules.
+    const http = new Set(this.registry.httpHostsFor(id));
+    const sessionOpts: CompileOptions = http.size
+      ? { ...compileOpts, schemeFor: (h: string) => (http.has(h) ? 'http:' : (compileOpts.schemeFor ?? defaultScheme)(h)) }
+      : compileOpts;
+    return { view, sessionOpts };
+  }
+
+  private takePatches(id: SessionId, before: number): number[] {
+    const list = this.patches.get(id);
+    if (!list) return [];
+    const gone = list.filter((p) => p.at < before);
+    const kept = list.filter((p) => p.at >= before);
+    if (kept.length) this.patches.set(id, kept);
+    else this.patches.delete(id);
+    return gone.flatMap((p) => p.ids);
+  }
+
+  /**
+   * ------------------------------------------------------------------
+   *  Purpose  |  Put a cookie a tab was just handed into the rules for
+   *           |  that one host, now, ahead of the full compile.
+   *  Why      |  A full compile rewrites every rule the session has,
+   *           |  hundreds for a session signed into Google, and a sign-in
+   *           |  page that sets a cookie from one fetch and sends the next
+   *           |  a few milliseconds later beat it every time: AWS's
+   *           |  sign-in answered "your session has expired". A handful
+   *           |  of rules for one host lands far sooner. They sit above
+   *           |  the host's own rules and are dropped by the next full
+   *           |  compile, which carries the same cookies.
+   * ------------------------------------------------------------------
+   */
+  async patch(id: SessionId, hosts: string[]): Promise<void> {
+    const session = this.registry.getSession(id);
+    if (!session || !(this.opts.enabled?.() ?? true) || !hosts.length) return;
+    const at = Date.now();
+    const { view, sessionOpts } = this.viewFor(id, session, this.opts);
+    const rules = [];
+    for (const host of new Set(hosts)) {
+      try {
+        const compiled = compileHost(view, host, () => PATCH_ID_BASE + (this.patchCursor++ % PATCH_CAPACITY), sessionOpts);
+        for (const r of compiled.rules) rules.push({ ...r, priority: r.priority + PATCH_PRIORITY_LIFT });
+      } catch {
+        /* the full compile reports a host it cannot make sense of */
+      }
+    }
+    if (!rules.length) return;
+    const ids = rules.map((r) => r.id);
+    // A slot reused from an older patch belongs to this one now.
+    for (const [sid, list] of this.patches) {
+      const pruned = list.map((p) => ({ ...p, ids: p.ids.filter((x) => !ids.includes(x)) })).filter((p) => p.ids.length);
+      if (pruned.length) this.patches.set(sid, pruned);
+      else this.patches.delete(sid);
+    }
+    const list = this.patches.get(id) ?? [];
+    list.push({ ids, at });
+    this.patches.set(id, list);
+    const applying = this.backend.apply(rules, ids).catch(() => undefined);
+    this.patchesInFlight.add(applying);
+    await applying;
+    this.patchesInFlight.delete(applying);
+  }
+
+  /**
+   * Resolves once every rule already owed is in the browser: fast-path patches
+   * in flight, then whatever the full compile has pending. A page that is about
+   * to send something it cannot send twice waits on this.
+   */
+  async settle(): Promise<void> {
+    // Only the fast path. Every cookie a managed tab is handed is patched in,
+    // so waiting on the patches is enough for that tab, and waiting on a full
+    // compile as well would put a whole-session rebuild in front of a page's
+    // ordinary requests.
+    await Promise.all([...this.patchesInFlight]);
   }
 
   /**
@@ -238,7 +373,7 @@ export class Engine {
         clearTimeout(expiry.timer);
         this.expiries.delete(sessionId);
       }
-      const ids = this.ids.releaseSession(sessionId);
+      const ids = [...this.takePatches(sessionId, Infinity), ...this.ids.releaseSession(sessionId)];
       if (ids.length) await this.backend.apply([], ids);
     };
     const next = this.inFlight ? this.inFlight.then(run, run) : run();

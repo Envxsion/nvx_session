@@ -57,6 +57,39 @@ describe('Engine flush loop', () => {
     vi.setSystemTime(NOW);
   });
 
+  it('anchors a host the tab is on over plain http to http, so its cookies go out', async () => {
+    const { calls, registry, backend } = harness();
+    registry.createSession(session('work', seeded('sid=v', 'http://nas.lan/')));
+    registry.bind(7, 'work', { windowId: 1, url: 'http://nas.lan/login', origin: 'manual' });
+    const engine = new Engine(registry, backend, { now: NOW });
+    engine.markDirty(['work']);
+    await engine.flush();
+    const filters = (calls[0]!.addRules ?? []).map((r) => r.condition.urlFilter).filter(Boolean);
+    expect(filters.some((f) => f!.startsWith('|http://nas.lan'))).toBe(true);
+    expect(filters.some((f) => f!.startsWith('|https://nas.lan'))).toBe(false);
+  });
+
+  it("withdraws a previous worker's rules in the same update that installs its own", async () => {
+    const { calls, registry, backend } = harness();
+    registry.createSession(session('work'));
+    registry.bind(7, 'work', { windowId: 1, url: 'https://vercel.com/', origin: 'manual' });
+
+    const engine = new Engine(registry, backend, { now: NOW });
+    engine.replaceOnNextFlush([4321, 4322]);
+    engine.markDirty(['work']);
+    await engine.flush();
+
+    // One call carries both, so there is no moment the tab has no rule.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.removeRuleIds).toEqual(expect.arrayContaining([4321, 4322]));
+    expect(calls[0]!.addRules!.length).toBeGreaterThan(0);
+
+    // And only once: a later flush does not withdraw them again.
+    engine.markDirty(['work']);
+    await engine.flush();
+    expect(calls.at(-1)!.removeRuleIds).not.toContain(4321);
+  });
+
   it('coalesces a burst into one call', async () => {
     const { calls, registry, backend } = harness();
     registry.createSession(session('work'));
@@ -135,7 +168,7 @@ describe('Engine flush loop', () => {
 
   it('reports overflow instead of dropping domains quietly', async () => {
     const store = new CookieStore();
-    for (let i = 0; i < 400; i++) {
+    for (let i = 0; i < 2000; i++) {
       const r = parseSetCookie('c=1', { url: new URL(`https://d${i}.com/`), now: NOW }, { isPublicSuffix, now: NOW });
       if (r.ok) store.upsert(r.cookie);
     }
@@ -243,6 +276,7 @@ describe('Engine isolation invariant', () => {
       Array.isArray(r.condition.tabIds) &&
       !r.condition.requestDomains &&
       !r.condition.urlFilter &&
+      (r.condition.resourceTypes?.length ?? 0) > 1 &&
       !r.condition.domainType &&
       r.action.requestHeaders?.[0]?.operation === 'remove';
     const lastHasCatchAll = () => (calls.at(-1)?.addRules ?? []).some(isCatchAll);
@@ -260,5 +294,80 @@ describe('Engine isolation invariant', () => {
     engine.markDirty(['work']);
     await vi.advanceTimersByTimeAsync(60);
     expect(lastHasCatchAll()).toBe(false); // and back
+  });
+});
+
+describe('the fast path for a cookie a tab was just handed', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  it('installs a few rules for that host above its own, and the next full compile drops them', async () => {
+    const { calls, registry, backend } = harness();
+    registry.createSession(session('work'));
+    registry.bind(7, 'work', { windowId: 1, url: 'https://vercel.com/', origin: 'manual' });
+    const engine = new Engine(registry, backend, { now: NOW });
+    engine.markDirty(['work']);
+    await engine.flush();
+    const fullCount = calls[0]!.addRules!.length;
+
+    vi.setSystemTime(NOW + 10);
+    await engine.patch('work', ['vercel.com']);
+    const patch = calls.at(-1)!;
+    expect(patch.addRules!.length).toBeGreaterThan(0);
+    expect(patch.addRules!.length).toBeLessThan(fullCount);
+    expect(patch.addRules!.every((r) => r.id >= 900_000 && r.priority > 1000)).toBe(true);
+    const ids = patch.addRules!.map((r) => r.id);
+
+    vi.setSystemTime(NOW + 20);
+    engine.markDirty(['work']);
+    await engine.flush();
+    expect(calls.at(-1)!.removeRuleIds).toEqual(expect.arrayContaining(ids));
+  });
+
+  it('keeps a patch that is newer than the compile that would drop it', async () => {
+    const { calls, registry, backend } = harness();
+    registry.createSession(session('work'));
+    registry.bind(7, 'work', { windowId: 1, url: 'https://vercel.com/', origin: 'manual' });
+    const engine = new Engine(registry, backend, { now: NOW });
+    vi.setSystemTime(NOW + 50);
+    await engine.patch('work', ['vercel.com']);
+    const ids = calls.at(-1)!.addRules!.map((r) => r.id);
+    vi.setSystemTime(NOW + 50);
+    engine.markDirty(['work']);
+    await engine.flush();
+    // Same instant: the compile cannot prove it saw the patch's cookie.
+    expect(calls.at(-1)!.removeRuleIds ?? []).not.toEqual(expect.arrayContaining(ids));
+  });
+});
+
+describe('the rule pool, shared between sessions with tabs', () => {
+  it('gives one busy session far more than the old fixed share, and splits it when a second arrives', async () => {
+    const store = new CookieStore();
+    for (let i = 0; i < 120; i++) {
+      const r = parseSetCookie('c=1', { url: new URL(`https://d${i}.com/`), now: NOW }, { isPublicSuffix, now: NOW });
+      if (r.ok) store.upsert(r.cookie);
+    }
+    const { calls, registry, backend } = harness();
+    registry.createSession(session('work', store));
+    registry.createSession(session('home'));
+    registry.bind(7, 'work', { windowId: 1, url: 'https://d0.com/', origin: 'manual' });
+    const overflow = vi.fn();
+    const engine = new Engine(registry, backend, { now: NOW, onOverflow: overflow });
+    engine.markDirty(['work']);
+    await engine.flush();
+    expect(overflow).not.toHaveBeenCalled();
+    expect(calls.at(-1)!.addRules!.length).toBeGreaterThan(320);
+
+    // A second session with a tab halves the share, and both recompile together.
+    registry.bind(8, 'home', { windowId: 1, url: 'https://vercel.com/', origin: 'manual' });
+    engine.markDirty(['home']);
+    await engine.flush();
+    const last = calls.at(-1)!;
+    const total = last.addRules!.length;
+    expect(total).toBeLessThanOrEqual(4400);
+    expect(last.addRules!.some((r) => r.condition.urlFilter?.includes('vercel.com'))).toBe(true);
+    expect(last.addRules!.some((r) => r.condition.urlFilter?.includes('d0.com'))).toBe(true);
   });
 });
