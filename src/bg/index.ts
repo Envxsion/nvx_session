@@ -70,7 +70,7 @@ import {
   proposedLabel,
   type AdoptionCandidate,
 } from '../kernel/adopt.js';
-import { RULE_ID_BASE, RULES_PER_SESSION } from '../netfilter/compile.js';
+import { IDENTITY_PROVIDERS, RULE_ID_BASE, RULES_PER_SESSION } from '../netfilter/compile.js';
 import {
   blockingIsReal,
   BlockingNetfilter,
@@ -1910,6 +1910,21 @@ async function noteHop(tabId: number, url: string, definite = false): Promise<vo
   if (!domain || isReleased(domain)) return;
 
   const now = Date.now();
+  // A hop NVX asked for again is not the site looping. Counting replays tripped
+  // the detector on an Okta sign-in that was recovering, and it released Okta
+  // for every session.
+  // A browser that gave up while NVX was retrying gave up on NVX's retries,
+  // not on the site, so that is not a reason to release it either.
+  if (now < (recovering.get(tabId) ?? 0)) {
+    if (definite) {
+      hopReplays.set(tabId, Array.from({ length: 4 }, () => now));
+      chainReplays.set(tabId, Array.from({ length: 3 }, () => now));
+      hopPending.delete(tabId);
+      recarryDue.delete(tabId);
+      note('warn', 'session', 'a sign-in kept bouncing, so NVX stopped retrying it', { tabId, host: domain });
+    }
+    return;
+  }
   const recent = (hops.get(tabId) ?? []).filter(([, at]) => now - at < LOOP_WINDOW_MS);
   recent.push([domain, now]);
   hops.set(tabId, recent);
@@ -1919,6 +1934,27 @@ async function noteHop(tabId: number, url: string, definite = false): Promise<vo
 
   hops.delete(tabId);
   const session = registry.getSession(binding.sessionId);
+
+  /**
+   * Never a sign-in provider. Releasing one is profile wide: every session's
+   * sign-in there falls back to the browser's own cookies, so two accounts end
+   * up sharing one provider session, which is the exact thing NVX exists to
+   * prevent. The tab stops being retried instead, and is told why.
+   */
+  if (IDENTITY_PROVIDERS.has(domain)) {
+    hopReplays.set(tabId, Array.from({ length: 4 }, () => now));
+    chainReplays.set(tabId, Array.from({ length: 3 }, () => now));
+    hopPending.delete(tabId);
+    recarryDue.delete(tabId);
+    note('warn', 'session', 'a sign-in kept bouncing, so NVX stopped retrying it', {
+      session: session?.label ?? binding.sessionId,
+      tabId,
+      host: domain,
+      detail: `${here} navigations in ${LOOP_WINDOW_MS / 1000} seconds; the site stays managed because it signs people in`,
+    });
+    noteInTab(tabId, 'This sign-in kept bouncing. NVX stopped retrying', '#c4614a', domain);
+    return;
+  }
 
   /**
    * Released rather than reported.
@@ -3538,6 +3574,64 @@ chrome.tabs.onCreated.addListener((tab) => {
  *           |  account. This event always names the source tab.
  * ------------------------------------------------------------------
  */
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Finish a redirect the hold rule stopped, once its
+ *           |  cookies are in the rules.
+ *  How      |  The response arrives without its Location and settles
+ *           |  as a page at the url that redirected. Two things have to
+ *           |  be true before the tab goes on: the patch carrying the
+ *           |  cookies has landed, and that page has committed. Then the
+ *           |  tab is sent on with location.replace, so the back button
+ *           |  does not land on the empty stop. A tab update is the
+ *           |  fallback if the page cannot be scripted.
+ *  Note     |  A 307 or 308 keeps its method and body, which this cannot
+ *           |  replay, so those go on as a GET and say so.
+ * ------------------------------------------------------------------
+ */
+const heldRedirects = new Map<number, { from: string; to: string; ready: boolean; committed: boolean; at: number }>();
+function heldTarget(url: string, headers?: chrome.webRequest.HttpHeader[]): string | null {
+  const loc = headers?.find((h) => h.name.toLowerCase() === 'location')?.value;
+  const cookie = headers?.some((h) => h.name.toLowerCase() === 'set-cookie');
+  if (!loc || !cookie) return null;
+  try {
+    return new URL(loc, url).href;
+  } catch {
+    return null;
+  }
+}
+function holdRedirect(tabId: number, from: string, to: string, status: number, method: string): void {
+  heldRedirects.set(tabId, { from, to, ready: false, committed: false, at: Date.now() });
+  if ((status === 307 || status === 308) && method.toUpperCase() !== 'GET') {
+    note('warn', 'tab', 'a held redirect kept its method, which cannot be replayed, so it went on as a GET', { tabId, url: to });
+  }
+  setTimeout(() => releaseHeld(tabId, 'timeout'), 3000);
+}
+function releaseHeld(tabId: number, why: 'ready' | 'committed' | 'timeout'): void {
+  const h = heldRedirects.get(tabId);
+  if (!h) return;
+  if (why === 'ready') h.ready = true;
+  if (why === 'committed') h.committed = true;
+  if (why !== 'timeout' && !(h.ready && h.committed)) return;
+  heldRedirects.delete(tabId);
+  void (async () => {
+    const done = await chrome.scripting
+      .executeScript({
+        target: { tabId },
+        func: (u: string) => location.replace(u),
+        args: [h.to],
+        injectImmediately: true,
+      })
+      .then(() => true, () => false);
+    if (!done) await chrome.tabs.update(tabId, { url: h.to }).catch(() => undefined);
+  })();
+}
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId !== 0) return;
+  const h = heldRedirects.get(details.tabId);
+  if (h && details.url === h.from) releaseHeld(details.tabId, 'committed');
+});
+
 const navigationSource = new Map<number, number>();
 chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
   navigationSource.set(details.tabId, details.sourceTabId);
@@ -3961,6 +4055,11 @@ chrome.webRequest.onHeadersReceived.addListener(
       // it), so the session's pages learn about it from here instead.
       pushJar(session.id, result.cookies);
       if (binding) noteFreshCookies(details.tabId, result.cookies);
+      const held =
+        binding && details.type === 'main_frame' && details.statusCode >= 300 && details.statusCode < 400
+          ? heldTarget(details.url, details.responseHeaders)
+          : null;
+      if (held) holdRedirect(details.tabId, details.url, held, details.statusCode, details.method);
 
       // A cookie set on a navigation response has to be in the rule before the
       // redirect that reads it back leaves, or the site sees the header without
@@ -3976,7 +4075,9 @@ chrome.webRequest.onHeadersReceived.addListener(
       // issue the next request before the rule lands, and the recarry catches that.
       if (binding) {
         const hosts = [hostOf(details.url), ...result.cookies.filter((c) => c.hostOnly).map((c) => c.domain)];
+        if (held) hosts.push(hostOf(held));
         await engine.patch?.(session.id, hosts.filter(Boolean));
+        if (held) releaseHeld(details.tabId, 'ready');
       }
       if (details.type === 'main_frame' || details.type === 'sub_frame') {
         await engine.flush();
@@ -4070,12 +4171,15 @@ function checkRecarry(tabId: number, url: URL, sent: string): boolean {
   const fresh = freshCookies.get(tabId);
   if (!fresh || Date.now() - fresh.at > 5000) return false;
   const host = url.hostname;
-  // By value, not just name: a rotated cookie (a new CSRF token, a new state)
-  // sent with its old value is as missing as one not sent at all.
+  // By name. A cookie sent with its previous value is not missing: load
+  // balancers and session layers rotate a value on every response (Monash's do)
+  // and accept the one before, and treating each rotation as a miss made every
+  // hop a retry and every retry another rotation, until the browser gave up on
+  // the redirects. Only a cookie the request did not carry at all is asked again.
   const pairs = new Set(
     sent
       .split(';')
-      .map((p) => p.trim())
+      .map((p) => p.split('=')[0]!.trim())
       .filter(Boolean)
   );
   const missed = fresh.cookies.some(
@@ -4083,7 +4187,7 @@ function checkRecarry(tabId: number, url: URL, sent: string): boolean {
       (c.hostOnly ? host === c.domain : host === c.domain || host.endsWith(`.${c.domain}`)) &&
       url.pathname.startsWith(c.path) &&
       (!c.secure || url.protocol === 'https:') &&
-      !pairs.has(`${c.name}=${c.value}`)
+      !pairs.has(c.name)
   );
   if (missed) recarryDue.add(tabId);
   else freshCookies.delete(tabId);
@@ -4106,17 +4210,33 @@ function checkRecarry(tabId: number, url: URL, sent: string): boolean {
  * ------------------------------------------------------------------
  */
 const hopReplays = new Map<number, number[]>();
+/** Until when a tab's hops are NVX's own replays rather than the site's. */
+const recovering = new Map<number, number>();
 function replayHop(tabId: number, url: string): void {
   const now = Date.now();
   const recent = (hopReplays.get(tabId) ?? []).filter((at) => now - at < 15_000);
   if (recent.length >= 4) return;
   hopReplays.set(tabId, [...recent, now]);
   recarryDue.delete(tabId);
+  recovering.set(tabId, now + 6000);
   note('info', 'tab', 'asked again for a hop that left without a cookie it was just given', { tabId, url });
-  // Asked for once the load in flight has finished. Navigating a tab to the url
-  // it is already loading is taken as nothing to do, and the replay was lost.
+  // The load in flight is stopped first, from inside the tab, and then asked for
+  // again. Waiting for it to finish let a site that restarts sign-in on a miss
+  // (Moodle sending the tab back to Okta with a new request) run a whole lap
+  // before the replay, and the laps kept coming. Navigating to the url already
+  // loading is taken as nothing to do, which is why it is stopped rather than
+  // replaced. If the stop cannot be injected, the replay waits for the load to
+  // settle instead, as before.
   hopPending.set(tabId, url);
-  void engine.flush();
+  void (async () => {
+    await engine.flush();
+    const stopped = await chrome.scripting
+      .executeScript({ target: { tabId }, func: () => window.stop(), injectImmediately: true })
+      .then(() => true, () => false);
+    if (!stopped || hopPending.get(tabId) !== url) return;
+    hopPending.delete(tabId);
+    await chrome.tabs.update(tabId, { url }).catch(() => undefined);
+  })();
 }
 const hopPending = new Map<number, string>();
 function settleHop(tabId: number): boolean {
@@ -4148,6 +4268,7 @@ chrome.webNavigation.onCompleted.addListener((details) => {
   if (recent.length >= 3) return;
   chainReplays.set(details.tabId, [...recent, now]);
   lastRecarry.set(details.tabId, now);
+  recovering.set(details.tabId, now + 8000);
   void (async () => {
     await whenReady();
     // The rule may still be landing; settle it before asking again.
@@ -4254,7 +4375,9 @@ chrome.webRequest.onSendHeaders.addListener(
         note('error', 'jar', 'a request carried a cookie it should not have', {
           session: session.label,
           url: details.url,
-          detail: result.events.join(', '),
+          // Names only, never values: which cookies, and whether each was
+          // foreign, missing or stale, is what makes the line worth reading.
+          detail: result.events.map((e) => `${e.kind}: ${e.names.join(' ')}`).join('; '),
         });
         void anomaly('foreign_cookie');
         engine.markDirty([session.id]);
