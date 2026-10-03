@@ -73,12 +73,21 @@ export interface LicensePorts {
   onToken: (token: string | null) => Promise<void>;
 }
 
+/**
+ * Why a stored key is not unlocking, as the server last said: paused by the
+ * operator, expired while a renewal is pending, or not found. The key is kept in
+ * every case, so a resumed or renewed licence comes back on the next refresh.
+ */
+export type LicenseLapse = 'paused' | 'expired' | 'not_found';
+
 /** What the settings screen shows about the licence, derived, never the token. */
 export interface LicenseStatus {
   /** Whether a claim key is stored at all, so the UI shows enter vs manage. */
   present: boolean;
   /** The device id, so the studio and a support request can name this machine. */
   device: string | null;
+  /** Set while a stored key is held but not unlocking; null when active or absent. */
+  lapse: LicenseLapse | null;
 }
 
 // ----------------------------------------------------------------- sync types

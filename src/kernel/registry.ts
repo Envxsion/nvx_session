@@ -215,6 +215,9 @@ export class Registry {
       return NONE;
     }
 
+    // Whoever shares the old or new origin may gain or lose the service worker.
+    const sharers = [...this.onOrigin(prior?.url ?? ''), ...this.onOrigin(opts.url)];
+
     this.bindings.set(tabId, {
       tabId,
       sessionId,
@@ -226,7 +229,7 @@ export class Registry {
       lastActive: now,
     });
 
-    const dirty = new Set<SessionId>([sessionId]);
+    const dirty = new Set<SessionId>([sessionId, ...sharers]);
     if (prior) dirty.add(prior.sessionId);
 
     // Rebinding a tab that has already sent requests changes who the origin
@@ -241,7 +244,30 @@ export class Registry {
     if (!b) return NONE;
     this.bindings.delete(tabId);
     this.sealedHistory.delete(tabId);
-    return { dirty: [b.sessionId], needsReload: [] };
+    // A contest on this origin may have just ended, handing someone the worker.
+    return { dirty: [...new Set([b.sessionId, ...this.onOrigin(b.url)])], needsReload: [] };
+  }
+
+  /**
+   * ------------------------------------------------------------------
+   *  Purpose  |  The sessions with a tab on a url's origin.
+   *  Why      |  Service worker ownership is decided per origin across
+   *           |  every session, so a tab arriving, leaving or closing
+   *           |  there can flip it for a session that did nothing.
+   *           |  Without recompiling them, the previous owner kept its
+   *           |  worker rule after the origin became contested, and the
+   *           |  shared worker's fetches for the newcomer's tab carried
+   *           |  the previous owner's cookies.
+   * ------------------------------------------------------------------
+   */
+  private onOrigin(url: string): SessionId[] {
+    const target = originOf(url);
+    if (!target) return [];
+    const out = new Set<SessionId>();
+    for (const b of this.bindings.values()) {
+      if (originOf(b.url) === target) out.add(b.sessionId);
+    }
+    return [...out];
   }
 
   /** Marks a tab as having shipped a request under its current binding. */
@@ -271,13 +297,17 @@ export class Registry {
     const b = this.bindings.get(tabId);
     if (!b) return NONE;
     const before = hostOf(b.url);
+    const left = originOf(b.url);
+    const sharersBefore = left === originOf(url) ? [] : this.onOrigin(b.url);
     b.url = url;
     b.lastActive = now;
     const after = hostOf(url);
     // Compared by host, not registrable domain. Rules are host scoped, so
     // moving from a service to its identity provider under one registrable
     // domain still needs a recompile or the new host has no rule of its own.
-    return before === after ? NONE : { dirty: [b.sessionId], needsReload: [] };
+    if (before === after) return NONE;
+    const sharersAfter = left === originOf(url) ? [] : this.onOrigin(url);
+    return { dirty: [...new Set([b.sessionId, ...sharersBefore, ...sharersAfter])], needsReload: [] };
   }
 
   movedWindow(tabId: number, windowId: number): void {
@@ -495,6 +525,30 @@ export class Registry {
     for (const b of this.bindings.values()) {
       const o = originOf(b.url);
       if (o) out.add(o);
+    }
+    return [...out];
+  }
+
+  /**
+   * ------------------------------------------------------------------
+   *  Purpose  |  Hosts this session's tabs are on over plain http.
+   *  Why      |  Rules are anchored to a scheme, and every host but
+   *           |  localhost was assumed to be https, so an intranet page,
+   *           |  a router or a NAS on http matched no rule: its
+   *           |  host-only cookies never went out and a sign-in there
+   *           |  never stuck. Seeing the tab on http is the evidence.
+   * ------------------------------------------------------------------
+   */
+  httpHostsFor(sessionId: SessionId): string[] {
+    const out = new Set<string>();
+    for (const b of this.bindings.values()) {
+      if (b.sessionId !== sessionId) continue;
+      try {
+        const u = new URL(b.url);
+        if (u.protocol === 'http:') out.add(u.hostname.toLowerCase());
+      } catch {
+        /* not a url, so not a host */
+      }
     }
     return [...out];
   }

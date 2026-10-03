@@ -332,7 +332,12 @@ function validBinding(b: unknown): b is Binding {
 
 export function deserialise(state: PersistedState): Registry {
   const registry = new Registry();
-  if (state.version !== SCHEMA_VERSION) return registry;
+  // Refused rather than read as empty. An empty registry here was a successful
+  // load of nothing, and the next save wrote that nothing over every session a
+  // newer or older build had saved.
+  if (state.version !== SCHEMA_VERSION) {
+    throw new Error(`state is schema version ${state.version}, this build reads ${SCHEMA_VERSION}`);
+  }
 
   for (const p of state.sessions.filter(validSession)) {
     /**
@@ -445,7 +450,13 @@ export class Persistence {
           ...(this.opts.audit ? { audit: this.opts.audit() } : {}),
         });
         const write: Record<string, unknown> = { [KEY]: next };
-        if (looksValid(prior[KEY])) write[BACKUP] = prior[KEY];
+        const held = prior[KEY];
+        if (looksValid(held)) {
+          // State another version wrote is set aside under its own name, never
+          // rotated into the backup slot where the next save would overwrite it.
+          if (held.version === SCHEMA_VERSION) write[BACKUP] = held;
+          else write[`${KEY}.v${held.version}`] = held;
+        }
         await this.area.set(write);
       } catch (e) {
         // Quota is the realistic failure. Losing the write is survivable
@@ -453,6 +464,9 @@ export class Persistence {
         // the next cold wake would restore a stale jar.
         this.pending = true;
         this.opts.onError?.(e);
+        // Tried again on its own rather than waiting for the next change, which
+        // might not come before the worker sleeps.
+        if (!this.timer) this.timer = setTimeout(() => void this.save(), 5000);
       }
     };
 
@@ -527,7 +541,8 @@ export interface Orphan {
 
 export function reconcile(
   registry: Registry,
-  liveTabs: LiveTab[]
+  liveTabs: LiveTab[],
+  opts: { restart?: boolean } = {}
 ): { kept: number[]; dropped: number[]; dirty: SessionId[]; orphans: Orphan[] } {
   const live = new Map<number, LiveTab>();
   for (const t of liveTabs) {
@@ -540,7 +555,11 @@ export function reconcile(
   const dirty = new Set<SessionId>();
 
   for (const b of registry.listBindings()) {
-    const tab = live.get(b.tabId);
+    // After a browser restart no tab id means anything: Chrome numbers tabs
+    // afresh each run, so a remembered id can name a different restored tab,
+    // quite possibly the same site in another account. Every binding is then an
+    // orphan, matched back by url, never by id.
+    const tab = opts.restart ? undefined : live.get(b.tabId);
     if (!tab) {
       dirty.add(b.sessionId);
       registry.unbind(b.tabId);
@@ -564,9 +583,8 @@ export function reconcile(
     // this project exists to prevent.
     //
     // Chrome assigns tab ids monotonically within a browser session and does
-    // not recycle them, so a surviving id is the same tab. Across a restart the
-    // question does not arise, because session rules are cleared and onStartup
-    // recompiles from scratch.
+    // not recycle them, so a surviving id is the same tab. Across a restart it
+    // does reuse them, which is why a restart never reaches this line.
     if (tab.url) registry.navigated(b.tabId, tab.url);
     if (typeof tab.windowId === 'number') registry.movedWindow(b.tabId, tab.windowId);
     dirty.add(b.sessionId);

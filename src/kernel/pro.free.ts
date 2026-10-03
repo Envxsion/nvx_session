@@ -37,7 +37,7 @@ export class License {
   }
 
   status(): LicenseStatus {
-    return { present: false, device: null };
+    return { present: false, device: null, lapse: null };
   }
 
   credentials(): { key: string; device: string } | null {
@@ -49,7 +49,9 @@ export class License {
     return { ok: false, reason: 'network' };
   }
 
-  async refresh(): Promise<void> {}
+  async refresh(): Promise<boolean> {
+    return false;
+  }
 
   async remove(): Promise<void> {}
 }

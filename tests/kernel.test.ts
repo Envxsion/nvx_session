@@ -160,6 +160,34 @@ describe('Registry resolution', () => {
 });
 
 describe('service worker ownership', () => {
+  it('recompiles the previous owner when a second session arrives on its origin', () => {
+    const r = registry('work', 'personal');
+    r.bind(7, 'work', bindOpts({ url: 'https://vercel.com/a' }));
+    const m = r.bind(8, 'personal', bindOpts({ url: 'https://vercel.com/b' }));
+    // work did nothing, but it just lost the worker and its [-1] rule must go.
+    expect(m.dirty).toContain('work');
+    expect(m.dirty).toContain('personal');
+  });
+
+  it('recompiles whoever shares an origin a tab navigates into or out of', () => {
+    const r = registry('work', 'personal');
+    r.bind(7, 'work', bindOpts({ url: 'https://vercel.com/a' }));
+    r.bind(8, 'personal', bindOpts({ url: 'https://github.com/' }));
+    const into = r.navigated(8, 'https://vercel.com/b');
+    expect(into.dirty).toEqual(expect.arrayContaining(['work', 'personal']));
+    const out = r.navigated(8, 'https://github.com/');
+    expect(out.dirty).toEqual(expect.arrayContaining(['work', 'personal']));
+  });
+
+  it('recompiles the remaining session when a contest ends by a tab closing', () => {
+    const r = registry('work', 'personal');
+    r.bind(7, 'work', bindOpts());
+    r.bind(8, 'personal', bindOpts());
+    const m = r.unbind(8);
+    expect(m.dirty).toEqual(expect.arrayContaining(['work', 'personal']));
+    expect(r.serviceWorkerOriginsFor('work')).toEqual(['https://vercel.com']);
+  });
+
   it('gives sole occupancy to the only session present', () => {
     const r = registry('work');
     r.bind(7, 'work', bindOpts());
@@ -557,6 +585,18 @@ describe('audit regressions', () => {
     const r = registry('work');
     r.bind(7, 'work', bindOpts({ url: '' }));
     expect(reconcile(r, []).orphans).toEqual([]);
+  });
+
+  it('trusts no tab id after a restart, because the browser reuses them', () => {
+    const r = registry('work', 'personal');
+    r.bind(5, 'work', bindOpts({ url: 'https://mail.google.com/mail/u/0/' }));
+    // The restarted browser happens to give id 5 to a different restored tab.
+    const out = reconcile(r, [{ id: 5, url: 'https://mail.google.com/mail/u/1/', windowId: 1 }], {
+      restart: true,
+    });
+    expect(out.kept).toEqual([]);
+    expect(r.binding(5)).toBeUndefined();
+    expect(out.orphans).toEqual([{ url: 'https://mail.google.com/mail/u/0/', sessionId: 'work' }]);
   });
 
   it('recompiles when the host changes even inside one registrable domain', () => {
