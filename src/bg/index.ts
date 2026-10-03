@@ -30,7 +30,7 @@ import { Entitlement, FEATURES, type Feature } from '../kernel/entitlement.js';
 import { License, Sync } from '../kernel/pro.js';
 import type { SyncConfig, SyncSession } from '../kernel/pro-types.js';
 import { Journal, LEVELS, formatJournal, type Area, type Level } from '../kernel/journal.js';
-import { ANON_SESSION_ID, Registry, domainOf, originOf, type SessionId } from '../kernel/registry.js';
+import { ANON_SESSION_ID, Registry, domainOf, originOf, type Session, type SessionId } from '../kernel/registry.js';
 import { browserDnrApi, DnrBackend } from '../netfilter/dnr.js';
 import { captureSetCookie, contextFor } from '../observer/capture.js';
 import { compare, DesyncLog } from '../observer/desync.js';
@@ -40,7 +40,7 @@ import { emit } from '../jar/emit.js';
 // the HTML specification, so lazy loading a module here fails at runtime with
 // no build-time warning.
 import { CookieStore } from '../jar/store.js';
-import { cookieKey, parseSetCookie } from '../jar/cookie.js';
+import { cookieKey, parseSetCookie, type Cookie } from '../jar/cookie.js';
 import { isPublicSuffix } from '../jar/psl.js';
 import { runSelfTest } from './selftest.js';
 import { runRestoreTest } from './restoretest.js';
@@ -70,7 +70,7 @@ import {
   proposedLabel,
   type AdoptionCandidate,
 } from '../kernel/adopt.js';
-import { RULES_PER_SESSION } from '../netfilter/compile.js';
+import { RULE_ID_BASE, RULES_PER_SESSION } from '../netfilter/compile.js';
 import {
   blockingIsReal,
   BlockingNetfilter,
@@ -415,6 +415,8 @@ function livePosture(): Settings['posture'] {
 
 /** Last day the licence was refreshed against the server, so it happens once a day, not every wake. */
 const LICENSE_REFRESH_KEY = 'nvx.license.refreshedAt';
+/** The hour stamp for the tighter check used near a billing boundary or after a lapse. */
+const LICENSE_REFRESH_HOUR_KEY = 'nvx.license.refreshedHour';
 
 /**
  * ------------------------------------------------------------------
@@ -427,11 +429,22 @@ const LICENSE_REFRESH_KEY = 'nvx.license.refreshedAt';
 async function maybeRefreshLicense(): Promise<void> {
   if (!licensePossible() || !license.status().present) return;
   try {
-    const today = new Date().toISOString().slice(0, 10);
-    const held = await storage.get([LICENSE_REFRESH_KEY]);
-    if (held[LICENSE_REFRESH_KEY] === today) return;
-    await storage.set({ [LICENSE_REFRESH_KEY]: today });
-    await license.refresh();
+    const now = Date.now();
+    const d = entitlement.current();
+    const exp = d.claims ? d.claims.exp * 1000 : 0;
+    // Near a billing boundary, or already lapsed, check hourly instead of daily,
+    // so a renewal that lands is picked up within the hour rather than tomorrow.
+    const urgent =
+      license.status().lapse !== null ||
+      d.reason === 'expired' ||
+      (exp > 0 && exp - now < 3 * 86_400_000);
+    const key = urgent ? LICENSE_REFRESH_HOUR_KEY : LICENSE_REFRESH_KEY;
+    const stamp = new Date(now).toISOString().slice(0, urgent ? 13 : 10);
+    const held = await storage.get([key]);
+    if (held[key] === stamp) return;
+    // Stamped only once the server actually answered, so an offline morning or
+    // a host error page does not use up the check.
+    if (await license.refresh()) await storage.set({ [key]: stamp });
   } catch {
     /* a missed refresh is harmless; the held token stands until its exp */
   }
@@ -444,6 +457,7 @@ function licenseSnapshot(): {
   license: {
     present: boolean;
     device: string | null;
+    lapse: string | null;
     possible: boolean;
     buildPro: boolean;
     dev: boolean;
@@ -463,6 +477,7 @@ function licenseSnapshot(): {
     license: {
       present: license.status().present,
       device: license.status().device,
+      lapse: license.status().lapse,
       possible: licensePossible(),
       buildPro: buildTier() === 'pro',
       dev: devUnlock(),
@@ -538,7 +553,7 @@ function syncApplyConfig(merged: SyncConfig): number {
         pinned: cleanPinned(s.pinned),
         store: new CookieStore(),
         family: Array.isArray(s.family) ? s.family.filter((x): x is string => typeof x === 'string') : [],
-        forked: [],
+        forked: [FORK_NEVER],
         danger: cleanDanger(s.danger),
         thirdParty: cleanThirdParty(s.thirdParty),
         allowedParties: Array.isArray(s.allowedParties)
@@ -943,12 +958,11 @@ function declarativeEngine(): Engine {
  * ------------------------------------------------------------------
  */
 function ownerOf(details: { tabId: number; url: string }): Owner {
+  // Worker traffic is nobody's: a managed page is refused a worker, so a
+  // request with no tab comes from an unmanaged tab's worker or the browser
+  // itself, and giving it a session's jar leaked that session to the profile.
   const binding = registry.binding(details.tabId);
-  const session = binding
-    ? registry.getSession(binding.sessionId)
-    : details.tabId < 0
-      ? ownerSessionFor(details.url)
-      : undefined;
+  const session = binding ? registry.getSession(binding.sessionId) : undefined;
   return session ? { id: session.id, store: session.store } : null;
 }
 
@@ -1369,7 +1383,7 @@ function ensureAnonymous(): void {
     pinned: [],
     store: new CookieStore(),
     family: [],
-    forked: [],
+    forked: [FORK_NEVER],
     danger: DEFAULT_DANGER,
     thirdParty: DEFAULT_THIRD_PARTY,
     ephemeral: true,
@@ -1965,6 +1979,29 @@ async function routeUnboundTab(tabId: number, url: string, windowId?: number): P
   if (isReleased(domain)) return;
   if (decided.get(tabId)?.has(domain)) return;
 
+  // A tab opened from another is that tab's business, and that answer comes
+  // before any other. The created event usually binds it first, but it waits
+  // on the worker like everything else, and a navigation that got here first
+  // fell through to the reopen memory or the picker: a popup sign-in parked at
+  // the picker, and a link from one session opened in the other because a tab
+  // of the other on that site had just been closed.
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (registry.binding(tabId) || held.has(tabId)) return;
+  const source = navigationSource.get(tabId) ?? tab?.openerTabId;
+  const openerSession = typeof source === 'number' ? registry.binding(source)?.sessionId : undefined;
+  if (openerSession && openerSession !== ANON) {
+    touched(
+      registry.bind(tabId, openerSession, {
+        windowId: windowId ?? chrome.windows.WINDOW_ID_NONE,
+        url,
+        origin: 'opener',
+      }),
+      true
+    );
+    noteBinding(tabId, openerSession, 'opened from a tab already in this session', url);
+    return;
+  }
+
   const remembered = rememberedFor(url);
   if (remembered) {
     const session = registry.getSession(remembered)!;
@@ -2205,7 +2242,7 @@ const armPaintProbe = async (fixture: string) => {
       pinned: [],
       store: new CookieStore(),
       family: [],
-      forked: [],
+      forked: [FORK_NEVER],
       danger: DEFAULT_DANGER,
     thirdParty: DEFAULT_THIRD_PARTY,
       createdAt: Date.now(),
@@ -2374,7 +2411,133 @@ const storageState = new Map<number, StorageReport>();
  *           |  it forever.
  * ------------------------------------------------------------------
  */
-function answerStorage(tabId: number, port: chrome.runtime.Port, url: string): void {
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  A session's script-readable cookies for one page, in
+ *           |  the shape the shim's document.cookie view keeps.
+ *  Note     |  HttpOnly cookies never leave the worker, exactly as a
+ *           |  browser never shows them to script.
+ * ------------------------------------------------------------------
+ */
+interface PageCookie {
+  n: string;
+  v: string;
+  d: string;
+  p: string;
+  h: boolean;
+  s: boolean;
+  e: number | null;
+}
+function toPageCookie(c: Cookie): PageCookie {
+  return { n: c.name, v: c.value, d: c.domain, p: c.path, h: c.hostOnly, s: c.secure, e: c.expires };
+}
+function pageCookies(session: Session, url: string): PageCookie[] {
+  let host = '';
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return [];
+  }
+  const now = Date.now();
+  const out: PageCookie[] = [];
+  for (const c of session.store.all()) {
+    if (c.httpOnly) continue;
+    if (c.expires !== null && c.expires <= now) continue;
+    const visible = c.hostOnly ? host === c.domain : host === c.domain || host.endsWith(`.${c.domain}`);
+    if (visible) out.push(toPageCookie(c));
+  }
+  return out;
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Tell every page in a session that its cookies changed.
+ *  How      |  Batched per session for a moment, then broadcast to the
+ *           |  session's tabs; each frame's agent keeps only the cookies
+ *           |  its own host can see before the page is told anything.
+ * ------------------------------------------------------------------
+ */
+const jarPending = new Map<SessionId, Cookie[]>();
+let jarTimer: ReturnType<typeof setTimeout> | null = null;
+function pushJar(sessionId: SessionId, cookies: Cookie[]): void {
+  const visible = cookies.filter((c) => !c.httpOnly);
+  if (!visible.length) return;
+  jarPending.set(sessionId, [...(jarPending.get(sessionId) ?? []), ...visible]);
+  if (jarTimer) return;
+  jarTimer = setTimeout(() => {
+    jarTimer = null;
+    const batch = [...jarPending];
+    jarPending.clear();
+    for (const [sid, list] of batch) {
+      const message = { kind: 'nvx.jar', cookies: list.map(toPageCookie) };
+      for (const tabId of registry.tabsFor(sid)) {
+        chrome.tabs.sendMessage(tabId, message).catch(() => undefined);
+      }
+    }
+  }, 30);
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Put one document.cookie write into the session store.
+ *  Note     |  The address is the sending frame's own, as the browser
+ *           |  reports it, so a page can only ever write its own site.
+ *           |  Script can neither set an HttpOnly cookie nor overwrite
+ *           |  one, so neither can this.
+ * ------------------------------------------------------------------
+ */
+function acceptPageCookie(tabId: number, value: string, url: string): void {
+  if (!value || !url) return;
+  const binding = registry.binding(tabId);
+  if (!binding) return;
+  const session = registry.getSession(binding.sessionId);
+  if (!session || session.id === ANON) return;
+  const result = captureSetCookie({ url, responseHeaders: [{ name: 'set-cookie', value }] });
+  if (!result.cookies.length) return;
+  const held = session.store.all();
+  const taken: Cookie[] = [];
+  for (const cookie of result.cookies) {
+    if (cookie.httpOnly) continue;
+    const shadowed = held.some(
+      (c) => c.httpOnly && c.name === cookie.name && c.domain === cookie.domain && c.path === cookie.path
+    );
+    if (shadowed) continue;
+    session.store.upsert(cookie);
+    taken.push(cookie);
+  }
+  if (!taken.length) return;
+  scheduleCookieFlush(session.id);
+  pushJar(session.id, taken);
+  // A script that sets a cookie and navigates at once is the same race as a
+  // response that does, so it gets the same fast path and the same check.
+  noteFreshCookies(tabId, taken);
+  void engine.patch?.(session.id, [hostOf(url)].filter(Boolean));
+  // The page may already have navigated: a script that writes a cookie and
+  // sets location in the same breath sends the next page before this message
+  // arrives. That load is looked at after the fact and asked for again if it
+  // left without the cookie, unless it is the page that wrote it.
+  const last = lastMainSend.get(tabId);
+  if (last && Date.now() - last.at < 2000 && last.url !== url && last.method.toUpperCase() === 'GET') {
+    try {
+      if (checkRecarry(tabId, new URL(last.url), last.sent)) replayHop(tabId, last.url);
+    } catch {
+      /* not a url, so nothing to ask for again */
+    }
+  }
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  The storage answer for one frame of a tab.
+ *  Note     |  Shared by the top frame's port and the one-shot frame
+ *           |  agent, so the two can never disagree about a session.
+ * ------------------------------------------------------------------
+ */
+function storageAnswer(
+  tabId: number,
+  url: string,
+  topFrame: boolean
+): { sid: string | null; fork: boolean; persona: string | null; idb: boolean; cookies: PageCookie[] } {
   const binding = registry.binding(tabId);
   const session = binding ? registry.getSession(binding.sessionId) : undefined;
   const origin = originOf(url || binding?.url || '');
@@ -2382,7 +2545,12 @@ function answerStorage(tabId: number, port: chrome.runtime.Port, url: string): v
   // The anonymous holding session deliberately carries no identity, and giving
   // it a storage namespace would make it one.
   const sid = session && session.id !== ANON ? session.id : null;
-  const fork = Boolean(sid && origin && !session!.forked.includes(origin));
+  // Only the top frame of a session that was adopted from the profile copies the
+  // origin's own storage; a session the user started fresh begins empty, as it
+  // should, or it would arrive holding the profile's account.
+  const fork = Boolean(
+    topFrame && sid && origin && !session!.forked.includes(FORK_NEVER) && !session!.forked.includes(origin)
+  );
 
   /**
    * The shim is handed a namespace, never the session id.
@@ -2424,8 +2592,13 @@ function answerStorage(tabId: number, port: chrome.runtime.Port, url: string): v
    */
   const idb = sid !== null && idbIsolationOn();
 
+  const cookies = session && sid ? pageCookies(session, url || binding?.url || '') : [];
+  return { sid: namespace, fork, persona, idb, cookies };
+}
+
+function answerStorage(tabId: number, port: chrome.runtime.Port, url: string): void {
   try {
-    port.postMessage({ kind: 'storage.commit', sid: namespace, fork, persona, idb });
+    port.postMessage({ kind: 'storage.commit', ...storageAnswer(tabId, url, true) });
   } catch {
     /* the tab went away between asking and being answered */
   }
@@ -2465,7 +2638,7 @@ function noteStorageState(
 
   if (state.mode !== 'live' || !named || !origin) return;
   const session = registry.getSession(named);
-  if (!session || session.forked.includes(origin)) return;
+  if (!session || session.forked.includes(origin) || session.forked.includes(FORK_NEVER)) return;
   // Recorded whether or not anything was actually copied. The question the flag
   // answers is "has this session arrived here before", and a first arrival that
   // found nothing to copy is still an arrival.
@@ -2506,6 +2679,16 @@ function pushStorage(tabId: number): void {
   answerStorage(tabId, port, registry.binding(tabId)?.url ?? '');
 }
 
+/** Whether two URLs share an origin. False when either is missing or unparseable. */
+function sameOrigin(a: string, b: string | undefined): boolean {
+  if (!b) return false;
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
+
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'nvx-agent') return;
   const tabId = port.sender?.tab?.id;
@@ -2521,6 +2704,26 @@ chrome.runtime.onConnect.addListener((port) => {
 
   port.onMessage.addListener((msg) => {
     void (async () => {
+      if (msg?.kind === 'settle') {
+        await whenReady();
+        await (engine.settle ? engine.settle() : engine.flush());
+        try {
+          port.postMessage({ kind: 'settle.ready' });
+        } catch {
+          /* the page went away while it waited */
+        }
+        return;
+      }
+      if (msg?.kind === 'child.wait') {
+        await whenReady();
+        await childBound(tabId);
+        try {
+          port.postMessage({ kind: 'child.ready' });
+        } catch {
+          /* the page went away while it waited */
+        }
+        return;
+      }
       if (msg?.kind === 'storage.hello') {
         await whenReady();
         answerStorage(tabId, port, typeof msg.url === 'string' ? msg.url : '');
@@ -2587,21 +2790,11 @@ chrome.runtime.onConnect.addListener((port) => {
         await whenReady();
         const value = typeof msg.value === 'string' ? msg.value : '';
         const url = typeof msg.url === 'string' ? msg.url : '';
-        if (!value || !url) return;
-        const binding = registry.binding(tabId);
-        if (!binding) return;
-        const session = registry.getSession(binding.sessionId);
-        if (!session || session.id === ANON) return;
-        // Parsed through the same path a Set-Cookie response header takes, so
-        // one code path decides what is a valid cookie and a page cannot push a
-        // shape a server never could.
-        const result = captureSetCookie({
-          url,
-          responseHeaders: [{ name: 'set-cookie', value }],
-        });
-        if (!result.cookies.length) return;
-        for (const cookie of result.cookies) session.store.upsert(cookie);
-        scheduleCookieFlush(session.id);
+        // The address must be the sending frame's own origin, which the browser
+        // vouches for in port.sender. A page cannot use this path to plant a
+        // cookie for any other site.
+        if (!sameOrigin(url, port.sender?.url)) return;
+        acceptPageCookie(tabId, value, url);
         return;
       }
       if (msg?.kind === 'icons') {
@@ -2694,7 +2887,19 @@ function whenReady(): Promise<void> {
 }
 
 const AGENT_SCRIPT_ID = 'nvx-agent';
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Marks a session that must never copy an origin's own
+ *           |  storage in.
+ *  Why      |  Copying is for a session adopted from the signed-in
+ *           |  profile, which would otherwise arrive signed out. A
+ *           |  session the user starts fresh is for a second account,
+ *           |  and copying would hand it the profile's first one.
+ * ------------------------------------------------------------------
+ */
+const FORK_NEVER = '*';
 const SHIM_SCRIPT_ID = 'nvx-storage';
+const FRAME_SCRIPT_ID = 'nvx-frame';
 const MASK_SCRIPT_ID = 'nvx-mask';
 const POLICY_SCRIPT_ID = 'nvx-policy';
 
@@ -2968,7 +3173,7 @@ async function reallyRegisterAgent(): Promise<void> {
   }
 
   try {
-    const ids = [AGENT_SCRIPT_ID, SHIM_SCRIPT_ID, MASK_SCRIPT_ID, POLICY_SCRIPT_ID];
+    const ids = [AGENT_SCRIPT_ID, FRAME_SCRIPT_ID, SHIM_SCRIPT_ID, MASK_SCRIPT_ID, POLICY_SCRIPT_ID];
     const existing = await chrome.scripting.getRegisteredContentScripts({ ids });
     if (existing.length) {
       await chrome.scripting.unregisterContentScripts({
@@ -2984,6 +3189,19 @@ async function reallyRegisterAgent(): Promise<void> {
         runAt: 'document_start',
         world: 'ISOLATED',
         allFrames: false,
+        persistAcrossSessions: false,
+      },
+      {
+        // Subframes only (it returns at once in a top frame): the storage
+        // handshake a frame needs so its shim learns the tab's session instead
+        // of falling back to the origin's shared storage. Before the shim, so its
+        // listener exists when the shim announces.
+        id: FRAME_SCRIPT_ID,
+        js: ['src/content/frame.js'],
+        matches,
+        runAt: 'document_start',
+        world: 'ISOLATED',
+        allFrames: true,
         persistAcrossSessions: false,
       },
       /**
@@ -3019,6 +3237,10 @@ async function reallyRegisterAgent(): Promise<void> {
         runAt: 'document_start',
         world: 'MAIN',
         allFrames: true,
+        // An about:blank or srcdoc frame is its own realm with the raw origin
+        // store and the browser's jar, reachable from the page through
+        // contentWindow, so it gets the shim too.
+        matchOriginAsFallback: true,
         persistAcrossSessions: false,
       },
     ]);
@@ -3053,11 +3275,19 @@ async function boot(): Promise<void> {
   // can be handed a slot whose previous occupant's rules are still live and
   // still rewriting headers. Clearing everything first is the only way to be
   // sure what is installed matches what the kernel believes.
+  //
+  // Cookie rules are the exception: they are withdrawn in the same update that
+  // installs this worker's own (see replaceOnNextFlush), because clearing them
+  // here and rebuilding several awaits later left every managed tab with no rule
+  // in between. The guard and persona bands are cleared now, as before.
+  let staleCookieIds: number[] = [];
   try {
     const stale = await backend.current();
+    const other = stale.filter((r) => r.id < RULE_ID_BASE).map((r) => r.id);
+    staleCookieIds = stale.filter((r) => r.id >= RULE_ID_BASE).map((r) => r.id);
+    if (other.length) await backend.apply([], other);
     if (stale.length) {
-      await backend.apply([], stale.map((r) => r.id));
-      note('info', 'rules', 'cleared rules a previous worker left', {
+      note('info', 'rules', 'replacing rules a previous worker left', {
         detail: `${stale.length} rule(s)`,
       });
     }
@@ -3110,7 +3340,9 @@ async function boot(): Promise<void> {
 
 
   const tabs = await chrome.tabs.query({});
-  const { kept, dropped, dirty, orphans } = reconcile(registry, tabs);
+  // Decided before any tab id is trusted: after a restart the ids are reused.
+  const fresh = await browserJustStarted();
+  const { kept, dropped, dirty, orphans } = reconcile(registry, tabs, { restart: fresh });
   if (dropped.length) {
     note('info', 'life', 'dropped stale bindings on wake', {
       detail: `${dropped.length} binding(s)`,
@@ -3131,14 +3363,23 @@ async function boot(): Promise<void> {
     }
   }
 
-  const fresh = await newBrowserSession(kept.length);
   // Before the compile below, so no rule is ever built carrying a cookie the
   // browser itself would have thrown away when it closed.
   if (fresh) dropSessionCookies();
 
-  if (dirty.length || fresh) {
-    engine.markDirty(dirty);
+  // Every session recompiles on boot, in one update with the withdrawal of what
+  // the previous worker installed, so a managed tab is never without a rule.
+  const everySession = registry.listSessions().map((s) => s.id);
+  if (engine instanceof Engine && everySession.length) {
+    engine.replaceOnNextFlush(staleCookieIds);
+    engine.markDirty(everySession);
     await engine.flush();
+  } else {
+    if (staleCookieIds.length) await backend.apply([], staleCookieIds).catch(() => undefined);
+    if (dirty.length || fresh) {
+      engine.markDirty(dirty);
+      await engine.flush();
+    }
   }
   // After the flush, so a tab put back into a session compiles from settled
   // state rather than racing the recompile above.
@@ -3147,6 +3388,11 @@ async function boot(): Promise<void> {
   // registration below so a licence that later unlocks Persona transitions from
   // what boot actually registered, not from a stale default that would mark
   // already-masked tabs as needing it.
+  // The stored licence goes into the gate first, so posture and registration
+  // below see the real tier. Left until later, every worker restart booted as
+  // free and the token's arrival then unmasked a Pro user's open tabs. It is a
+  // storage read and one signature check; a failure still boots, as free.
+  await license.init().catch(() => undefined);
   lastLivePosture = livePosture();
   await registerAgent();
   rebuildMenus();
@@ -3275,8 +3521,98 @@ chrome.tabs.onCreated.addListener((tab) => {
       opened ? 'opened from a tab already in this session' : 'the only session that covers it',
       tab.pendingUrl ?? tab.url ?? ''
     );
+    await engine.flush();
+    if (opened) settleChild(tab.openerTabId!);
+    recoverEarly(tab.id);
   })();
 });
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  The tab a page opened, named by the browser itself.
+ *  Why      |  openerTabId is not reliably set on a tab a page opens
+ *           |  with window.open or target=_blank, and without it the
+ *           |  new tab looked unrelated: it was held at the picker, or
+ *           |  matched to whichever session had last closed a tab on
+ *           |  that site, which put one account's link in the other
+ *           |  account. This event always names the source tab.
+ * ------------------------------------------------------------------
+ */
+const navigationSource = new Map<number, number>();
+chrome.webNavigation.onCreatedNavigationTarget.addListener((details) => {
+  navigationSource.set(details.tabId, details.sourceTabId);
+  setTimeout(() => navigationSource.delete(details.tabId), 60_000);
+  void (async () => {
+    await whenReady();
+    const from = registry.binding(details.sourceTabId);
+    if (!from || from.sessionId === ANON) return;
+    const existing = registry.binding(details.tabId);
+    if (existing?.sessionId === from.sessionId) {
+      settleChild(details.sourceTabId);
+      return;
+    }
+    if (held.has(details.tabId)) held.delete(details.tabId);
+    touched(
+      registry.bind(details.tabId, from.sessionId, {
+        windowId: chrome.windows.WINDOW_ID_NONE,
+        url: details.url,
+        origin: 'opener',
+      }),
+      true
+    );
+    noteBinding(details.tabId, from.sessionId, 'opened from a tab already in this session', details.url);
+    await engine.flush();
+    settleChild(details.sourceTabId);
+    recoverEarly(details.tabId);
+  })();
+});
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  A new tab's first request, sent before the tab was in
+ *           |  its session.
+ *  Why      |  The tab is bound when the browser reports it, which is
+ *           |  after it has started loading, and a rule scoped to its
+ *           |  id cannot exist before then. So a link or window.open
+ *           |  into a new tab arrived with no cookies, or the profile's.
+ *           |  A GET is loaded again once the rules are in. A POST
+ *           |  cannot be, so the page holds those until the tab is
+ *           |  ready (childBound below, and the shim's form hold).
+ * ------------------------------------------------------------------
+ */
+const earlyUnbound = new Map<number, { method: string; url: string; at: number }>();
+const recovered = new Set<number>();
+function recoverEarly(tabId: number): void {
+  const early = earlyUnbound.get(tabId);
+  earlyUnbound.delete(tabId);
+  if (!early || Date.now() - early.at > 5000 || recovered.has(tabId)) return;
+  if (early.method.toUpperCase() !== 'GET') return;
+  recovered.add(tabId);
+  void chrome.tabs.update(tabId, { url: early.url }).catch(() => undefined);
+}
+
+/** Pages waiting for a tab they are about to open to be in their session. */
+const childWaiters = new Map<number, (() => void)[]>();
+function childBound(openerTabId: number): Promise<void> {
+  return new Promise((resolve) => {
+    const list = childWaiters.get(openerTabId) ?? [];
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      resolve();
+    };
+    list.push(finish);
+    childWaiters.set(openerTabId, list);
+    setTimeout(finish, 2500);
+  });
+}
+function settleChild(openerTabId: number): void {
+  const list = childWaiters.get(openerTabId);
+  if (!list) return;
+  childWaiters.delete(openerTabId);
+  for (const go of list) go();
+}
 
 chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
   if (!change.url) return;
@@ -3390,6 +3726,10 @@ chrome.tabs.onAttached.addListener((tabId, info) => {
   void (async () => {
     await whenReady();
     registry.movedWindow(tabId, info.newWindowId);
+    // Saved and regrouped now, not on whatever changes next: a tab dragged to
+    // another window should land in its session's group there.
+    persistence.schedule();
+    scheduleRegroup();
   })();
 });
 
@@ -3430,6 +3770,10 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
       await routeUnboundTab(details.tabId, details.url);
       return;
     }
+    // The new host goes into the registry first, so the flush below builds its
+    // rule. Without this nothing was dirty and the flush did nothing, leaving a
+    // brand new site to the bottom-priority navigation rule.
+    touched(registry.navigated(details.tabId, details.url));
     // A stale rule during a top level navigation is the one case that logs you
     // out, so this waits rather than coalescing.
     await engine.flush();
@@ -3440,6 +3784,26 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
     // After the flush, so the step is logged against the rules that will
     // actually carry this navigation, not the ones from before it settled.
     noteSignInStep(details.tabId, binding.sessionId, details.url);
+  })();
+});
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Count a hop only when the page moved by itself.
+ *  Why      |  A loop is redirects. Counting every navigation start
+ *           |  meant reloading a page a few times, or paging through a
+ *           |  site that does full loads, read as a loop and released
+ *           |  the whole site. A commit the browser marks as a client
+ *           |  redirect (script or meta refresh) counts; anything the
+ *           |  user started does not. Server redirects are counted as
+ *           |  they happen, in onBeforeRedirect.
+ * ------------------------------------------------------------------
+ */
+chrome.webNavigation.onCommitted.addListener((details) => {
+  if (details.frameId !== 0) return;
+  if (!(details.transitionQualifiers ?? []).includes('client_redirect')) return;
+  void (async () => {
+    await whenReady();
     await noteHop(details.tabId, details.url);
   })();
 });
@@ -3453,6 +3817,30 @@ chrome.webNavigation.onBeforeNavigate.addListener((details) => {
  *           |  Believed on sight: by now the loop has run twenty times.
  * ------------------------------------------------------------------
  */
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Follow a server redirect to a new host as it happens.
+ *  How      |  onBeforeNavigate fires once per navigation, not per hop,
+ *           |  so a sign-in that redirects through an identity provider
+ *           |  would otherwise only reach the registry on commit.
+ *  Note     |  Observational: the next hop may leave before the rule
+ *           |  lands, and the navigation rule covers that moment.
+ * ------------------------------------------------------------------
+ */
+chrome.webRequest.onBeforeRedirect.addListener(
+  (details) => {
+    if (details.tabId < 0) return;
+    void (async () => {
+      await whenReady();
+      if (!registry.binding(details.tabId)) return;
+      touched(registry.navigated(details.tabId, details.redirectUrl));
+      await engine.flush();
+      await noteHop(details.tabId, details.redirectUrl);
+    })();
+  },
+  { urls: ['http://*/*', 'https://*/*'], types: ['main_frame'] }
+);
+
 chrome.webNavigation.onErrorOccurred.addListener((details) => {
   if (details.frameId !== 0) return;
   if (!/TOO_MANY_REDIRECTS/i.test(details.error ?? '')) return;
@@ -3545,10 +3933,12 @@ chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     void (async () => {
       await whenReady();
+      // Only a managed tab's own responses. An unmanaged tab, or a worker, is
+      // the profile talking: its Set-Cookie is the profile's, and filing it
+      // under whichever session sat on the origin put the profile account's
+      // rotated cookies beside a session's own and signed that session out.
       const binding = registry.binding(details.tabId);
-      const session = binding
-        ? registry.getSession(binding.sessionId)
-        : ownerSessionFor(details.url);
+      const session = binding ? registry.getSession(binding.sessionId) : undefined;
       if (!session) return;
 
       // The anonymous session is a holding pen, not an account, and its jar is
@@ -3567,15 +3957,27 @@ chrome.webRequest.onHeadersReceived.addListener(
       for (const cookie of result.cookies) session.store.upsert(cookie);
       engine.markDirty([session.id]);
       persistence.schedule();
+      // The response's Set-Cookie never reached the browser's jar (a rule strips
+      // it), so the session's pages learn about it from here instead.
+      pushJar(session.id, result.cookies);
+      if (binding) noteFreshCookies(details.tabId, result.cookies);
 
       // A cookie set on a navigation response has to be in the rule before the
       // redirect that reads it back leaves, or the site sees the header without
       // the cookie it just set and declares cookies disabled, which is the
       // "Cookies are disabled" wall a SAML sign-in hits mid-chain. So a
       // navigation response recompiles now rather than on the deferred schedule.
-      // A subresource cookie, which is far more frequent, keeps coalescing. This
-      // narrows the race but cannot close it: the listener is observational, so
-      // the browser can still issue the redirect before the rule lands.
+      // A managed tab's own requests flush at once too: a sign-in
+      // page sets its cookies from a fetch and navigates the moment it answers,
+      // which is how Google's password step met a rule without the cookie its
+      // previous step set and showed "Cookies are disabled". Only background
+      // traffic, a service worker's, keeps coalescing. This narrows the race but
+      // cannot close it: the listener is observational, so the browser can still
+      // issue the next request before the rule lands, and the recarry catches that.
+      if (binding) {
+        const hosts = [hostOf(details.url), ...result.cookies.filter((c) => c.hostOnly).map((c) => c.domain)];
+        await engine.patch?.(session.id, hosts.filter(Boolean));
+      }
       if (details.type === 'main_frame' || details.type === 'sub_frame') {
         await engine.flush();
       }
@@ -3612,14 +4014,167 @@ chrome.webRequest.onHeadersReceived.addListener(
  *           |  on the wire.
  * ------------------------------------------------------------------
  */
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Load a page again when its request beat the cookie a
+ *           |  redirect had just set.
+ *  Why      |  A sign-in answers with a redirect that sets the session
+ *           |  cookie, and the browser follows it in milliseconds. The
+ *           |  rule that carries the new cookie is built from the
+ *           |  observer, which cannot hold the request, so that next
+ *           |  hop can leave without it and the site shows the user as
+ *           |  signed out. Found in the browser: a fast host lost the
+ *           |  race every time. The request's real Cookie header says
+ *           |  whether it did; if so the page loads once more, now with
+ *           |  the rule in place. Once per tab per ten seconds.
+ * ------------------------------------------------------------------
+ */
+const freshCookies = new Map<number, { cookies: Cookie[]; at: number }>();
+/**
+ * Where each tab's current navigation started, and how. A race lost mid-chain
+ * (Google's sign-in sets a cookie, redirects, and rejects the hop that arrives
+ * without it) ends on an error page, and reloading that page asks the error
+ * again; the chain has to start over. Only a GET is replayed: a POST that is
+ * re-run as a GET would be a different request, so that case reloads the page.
+ */
+const chainStart = new Map<number, { requestId: string; url: string; method: string }>();
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    if (details.tabId < 0) return undefined;
+    const held = chainStart.get(details.tabId);
+    if (held?.requestId === details.requestId) return undefined; // a redirect hop, same chain
+    chainStart.set(details.tabId, { requestId: details.requestId, url: details.url, method: details.method });
+    return undefined;
+  },
+  { urls: ['http://*/*', 'https://*/*'], types: ['main_frame'] }
+);
+const recarryDue = new Set<number>();
+/** Each managed tab's latest page load, for a cookie that arrives after it left. */
+const lastMainSend = new Map<number, { url: string; method: string; sent: string; at: number }>();
+const lastRecarry = new Map<number, number>();
+const chainReplays = new Map<number, number[]>();
+
+function noteFreshCookies(tabId: number, cookies: Cookie[]): void {
+  const now = Date.now();
+  const live = cookies.filter((c) => c.expires === null || c.expires > now);
+  if (!live.length) return;
+  // Accumulated across responses inside the window, since a sign-in step sets
+  // cookies from several fetches before it navigates, and keeping only the
+  // last response's forgot the one the server was about to check for.
+  const held = freshCookies.get(tabId);
+  const keep = held && now - held.at <= 5000 ? held.cookies.filter((c) => !live.some((n) => n.name === c.name && n.domain === c.domain && n.path === c.path)) : [];
+  freshCookies.set(tabId, { cookies: [...keep, ...live], at: now });
+}
+
+function checkRecarry(tabId: number, url: URL, sent: string): boolean {
+  const fresh = freshCookies.get(tabId);
+  if (!fresh || Date.now() - fresh.at > 5000) return false;
+  const host = url.hostname;
+  // By value, not just name: a rotated cookie (a new CSRF token, a new state)
+  // sent with its old value is as missing as one not sent at all.
+  const pairs = new Set(
+    sent
+      .split(';')
+      .map((p) => p.trim())
+      .filter(Boolean)
+  );
+  const missed = fresh.cookies.some(
+    (c) =>
+      (c.hostOnly ? host === c.domain : host === c.domain || host.endsWith(`.${c.domain}`)) &&
+      url.pathname.startsWith(c.path) &&
+      (!c.secure || url.protocol === 'https:') &&
+      !pairs.has(`${c.name}=${c.value}`)
+  );
+  if (missed) recarryDue.add(tabId);
+  else freshCookies.delete(tabId);
+  return missed;
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Ask again for the one hop that left without a cookie it
+ *           |  was just given.
+ *  Why      |  The browser follows a redirect the moment it arrives,
+ *           |  and a rule cannot be in place by then: the extension
+ *           |  only hears about the cookie as the next hop leaves. Server
+ *           |  speed does not help. Replaying the whole chain once it
+ *           |  had finished worked only for one race per chain and once
+ *           |  per ten seconds, so a sign-in that raced at two hops never
+ *           |  recovered. A GET hop is asked for again as soon as the
+ *           |  rule is in, which supersedes the request still in flight.
+ *           |  A few per tab, then the chain replay below takes over.
+ * ------------------------------------------------------------------
+ */
+const hopReplays = new Map<number, number[]>();
+function replayHop(tabId: number, url: string): void {
+  const now = Date.now();
+  const recent = (hopReplays.get(tabId) ?? []).filter((at) => now - at < 15_000);
+  if (recent.length >= 4) return;
+  hopReplays.set(tabId, [...recent, now]);
+  recarryDue.delete(tabId);
+  note('info', 'tab', 'asked again for a hop that left without a cookie it was just given', { tabId, url });
+  // Asked for once the load in flight has finished. Navigating a tab to the url
+  // it is already loading is taken as nothing to do, and the replay was lost.
+  hopPending.set(tabId, url);
+  void engine.flush();
+}
+const hopPending = new Map<number, string>();
+function settleHop(tabId: number): boolean {
+  const url = hopPending.get(tabId);
+  if (url === undefined) return false;
+  hopPending.delete(tabId);
+  void (async () => {
+    await engine.flush();
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) return;
+    if ((tab.url ?? '') === url) await chrome.tabs.reload(tabId).catch(() => undefined);
+    else await chrome.tabs.update(tabId, { url }).catch(() => undefined);
+  })();
+  return true;
+}
+chrome.webNavigation.onErrorOccurred.addListener((details) => {
+  if (details.frameId === 0) settleHop(details.tabId);
+});
+
+chrome.webNavigation.onCompleted.addListener((details) => {
+  if (details.frameId === 0 && settleHop(details.tabId)) return;
+  if (details.frameId !== 0 || !recarryDue.delete(details.tabId)) return;
+  freshCookies.delete(details.tabId);
+  const now = Date.now();
+  // Three chain replays in twenty seconds, enough for a chain that races at
+  // more than one hop, and still bounded so a site that never accepts can only
+  // cost a few loads. The loop detector watches the same tab regardless.
+  const recent = (chainReplays.get(details.tabId) ?? []).filter((at) => now - at < 20_000);
+  if (recent.length >= 3) return;
+  chainReplays.set(details.tabId, [...recent, now]);
+  lastRecarry.set(details.tabId, now);
+  void (async () => {
+    await whenReady();
+    // The rule may still be landing; settle it before asking again.
+    await engine.flush();
+    const start = chainStart.get(details.tabId);
+    if (start && start.method.toUpperCase() === 'GET' && start.url !== details.url) {
+      await chrome.tabs.update(details.tabId, { url: start.url }).catch(() => undefined);
+    } else {
+      await chrome.tabs.reload(details.tabId).catch(() => undefined);
+    }
+  })();
+});
+
 chrome.webRequest.onSendHeaders.addListener(
   (details) => {
     void (async () => {
       await whenReady();
       const binding = registry.binding(details.tabId);
-      if (!binding) return;
+      if (!binding) {
+        if (details.type === 'main_frame' && details.tabId >= 0) {
+          earlyUnbound.set(details.tabId, { method: details.method, url: details.url, at: Date.now() });
+        }
+        return;
+      }
       const session = registry.getSession(binding.sessionId);
       if (!session) return;
+      const firstLoad = !binding.sealed && Date.now() - binding.boundAt < 5000;
 
       registry.seal(details.tabId);
 
@@ -3637,6 +4192,12 @@ chrome.webRequest.onSendHeaders.addListener(
       });
       const expected = emit(session.store, url, context).header;
       const sent = details.requestHeaders?.find((h) => h.name.toLowerCase() === 'cookie')?.value;
+      if (details.type === 'main_frame') {
+        lastMainSend.set(details.tabId, { url: details.url, method: details.method, sent: sent ?? '', at: Date.now() });
+      }
+      if (details.type === 'main_frame' && checkRecarry(details.tabId, url, sent ?? '') && details.method.toUpperCase() === 'GET') {
+        replayHop(details.tabId, details.url);
+      }
 
       // Who else was on the page, and through whom. Recorded whatever the
       // setting says, because a control with no evidence behind it is a
@@ -3665,6 +4226,17 @@ chrome.webRequest.onSendHeaders.addListener(
       desync.observed();
       const result = compare(sent, expected);
       if (result.matched) return;
+      // A tab's first page load went out before its rules did. Loaded again
+      // once, as a GET can be.
+      if (
+        firstLoad &&
+        details.type === 'main_frame' &&
+        details.method.toUpperCase() === 'GET' &&
+        !recovered.has(details.tabId)
+      ) {
+        recovered.add(details.tabId);
+        void engine.flush().then(() => chrome.tabs.update(details.tabId, { url: details.url }).catch(() => undefined));
+      }
 
       for (const event of result.events) {
         desync.record({
@@ -4081,11 +4653,6 @@ async function seedCookie(sessionId: string, url: string, header: string): Promi
   return parsed.cookie;
 }
 
-/** The session that owns an origin's service worker, for tabId -1 traffic. */
-function ownerSessionFor(url: string) {
-  const policy = registry.serviceWorkerPolicy(url);
-  return policy.owner && !policy.contested ? registry.getSession(policy.owner) : undefined;
-}
 
 // ------------------------------------------------------------- lifecycle
 
@@ -4098,6 +4665,8 @@ function ownerSessionFor(url: string) {
  * ------------------------------------------------------------------
  */
 async function openPanel(): Promise<void> {
+  // The suites need a local fixture server, so only a developer build opens them.
+  if (!devUnlock()) return;
   const url = chrome.runtime.getURL('diagnostics.html');
   const existing = await chrome.tabs.query({ url });
   const open = existing.find((t) => typeof t.id === 'number');
@@ -4191,51 +4760,80 @@ async function noteLifecycle(event: string, detail = ''): Promise<void> {
  *           |  back" is always offered and no-ops on an unbound tab.
  * ------------------------------------------------------------------
  */
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Rebuild the context menu, one rebuild at a time.
+ *  Why      |  It is called from several places without waiting, and
+ *           |  two overlapping removeAll calls both ran before either
+ *           |  set of creates, so the second set hit "duplicate id"
+ *           |  errors on the extensions page. A request made while one
+ *           |  is running is folded into a single follow-up.
+ * ------------------------------------------------------------------
+ */
+let menusBusy = false;
+let menusAgain = false;
 function rebuildMenus(): void {
   if (!chrome.contextMenus) return;
+  if (menusBusy) {
+    menusAgain = true;
+    return;
+  }
+  menusBusy = true;
   chrome.contextMenus.removeAll(() => {
-    const sessions = registry.listSessions().filter((x) => x.id !== ANON);
-    if (!sessions.length) return;
+    try {
+      buildMenus();
+    } finally {
+      menusBusy = false;
+      if (menusAgain) {
+        menusAgain = false;
+        rebuildMenus();
+      }
+    }
+  });
+}
 
-    const onLink = chrome.contextMenus.create({
-      id: 'nvx.open',
-      title: 'Open link in session',
+function buildMenus(): void {
+  const sessions = registry.listSessions().filter((x) => x.id !== ANON);
+  if (!sessions.length) return;
+
+  const onLink = chrome.contextMenus.create({
+    id: 'nvx.open',
+    title: 'Open link in session',
+    contexts: ['link'],
+  });
+  for (const sn of sessions) {
+    chrome.contextMenus.create({
+      id: `nvx.open.${sn.id}`,
+      parentId: onLink,
+      title: sn.label,
       contexts: ['link'],
     });
-    for (const sn of sessions) {
-      chrome.contextMenus.create({
-        id: `nvx.open.${sn.id}`,
-        parentId: onLink,
-        title: sn.label,
-        contexts: ['link'],
-      });
-    }
+  }
 
-    const onPage = chrome.contextMenus.create({
-      id: 'nvx.tab',
-      title: 'This tab',
-      contexts: ['page'],
-    });
-    for (const sn of sessions) {
-      chrome.contextMenus.create({
-        id: `nvx.move.${sn.id}`,
-        parentId: onPage,
-        title: `Move to ${sn.label}`,
-        contexts: ['page'],
-      });
-    }
+  const onPage = chrome.contextMenus.create({
+    id: 'nvx.tab',
+    title: 'This tab',
+    contexts: ['page'],
+  });
+  for (const sn of sessions) {
     chrome.contextMenus.create({
-      id: 'nvx.sep',
+      id: `nvx.move.${sn.id}`,
       parentId: onPage,
-      type: 'separator',
+      title: `Move to ${sn.label}`,
       contexts: ['page'],
     });
-    chrome.contextMenus.create({
-      id: 'nvx.unbind',
-      parentId: onPage,
-      title: 'Hand back to the browser',
-      contexts: ['page'],
-    });
+  }
+  chrome.contextMenus.create({
+    id: 'nvx.sep',
+    parentId: onPage,
+    type: 'separator',
+    contexts: ['page'],
+  });
+  chrome.contextMenus.create({
+    id: 'nvx.unbind',
+    parentId: onPage,
+    title: 'Hand back to the browser',
+    contexts: ['page'],
   });
 }
 
@@ -4336,8 +4934,11 @@ chrome.runtime.onStartup.addListener(() => {
     void maybeActive();
   });
   // Session rules die with the browser session, so a restart has to recompile
-  // everything rather than trust what the registry remembers.
-  ready = boot().then(async () => {
+  // everything rather than trust what the registry remembers. Chained onto the
+  // boot already running rather than starting a second: two boots at once each
+  // reconciled the same registry, so the second found no orphans and the tabs
+  // were never put back, and its rule clear undid the first one's install.
+  ready = whenReady().then(async () => {
     // boot has already dropped what a new browser session should drop and put
     // the tabs back, guarded by its own marker, so this only has to make sure
     // the rules exist. Kept because a browser that does fire it gets the work
@@ -4350,17 +4951,24 @@ chrome.runtime.onStartup.addListener(() => {
 /**
  * ------------------------------------------------------------------
  *  Purpose  |  Whether the browser itself has just started, not the
- *           |  worker waking or the extension reloading.
+ *           |  worker waking or the extension updating.
  *  How      |  chrome.storage.session clears when the browser session
- *           |  ends, but also on reload or update, so it is paired with
- *           |  the tabs: across a restart every tab returns with a new
- *           |  id, so one surviving binding proves the browser kept
- *           |  running.
+ *           |  ends, and also when the extension is updated. An update
+ *           |  changes the version and a restart does not, so the
+ *           |  version recorded in local storage tells them apart.
+ *  Bug-Fix  |  This used to count surviving bindings by tab id, but a
+ *           |  restarted browser reuses ids, so a remembered id could
+ *           |  match a different restored tab. That counted as the
+ *           |  browser still running, kept the wrong binding (another
+ *           |  account on the same site), and skipped the restore.
  *  Note     |  onStartup is not usable: in Opera GX loaded from the
- *           |  command line it does not fire.
+ *           |  command line it does not fire. Reloading an unpacked
+ *           |  copy without changing its version reads as a restart,
+ *           |  which only costs a developer a restore by url.
  * ------------------------------------------------------------------
  */
-async function newBrowserSession(survivingBindings: number): Promise<boolean> {
+const LAST_VERSION_KEY = 'nvx.lastVersion';
+async function browserJustStarted(): Promise<boolean> {
   const area = (chrome.storage as { session?: chrome.storage.StorageArea }).session;
   // Manifest v2 has no session area, and its background page dies with the
   // browser, so every boot there really is a new browser session.
@@ -4369,7 +4977,11 @@ async function newBrowserSession(survivingBindings: number): Promise<boolean> {
     const seen = await area.get('nvx.browserSession');
     await area.set({ 'nvx.browserSession': Date.now() });
     if (seen['nvx.browserSession']) return false;
-    return survivingBindings === 0;
+    const version = chrome.runtime.getManifest().version;
+    const held = await storage.get([LAST_VERSION_KEY]);
+    await storage.set({ [LAST_VERSION_KEY]: version });
+    // A first install has nothing to restore; an update keeps every tab id.
+    return held[LAST_VERSION_KEY] === version;
   } catch {
     // Refusing to answer is not answering yes. Dropping every session cookie
     // because a storage call failed would sign the user out for no reason.
@@ -4445,6 +5057,30 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
    * domain, which is a state any site can already reach by serving a policy that
    * refuses workers. There is no version of this that grants anything.
    */
+  /**
+   * The subframe handshake, the other content-script messages accepted here.
+   *
+   * Both are answered from what the browser stamps on the message, the sender's
+   * tab and frame address, never from anything the frame says about itself, so
+   * a frame can only learn its own tab's session and only write its own site.
+   */
+  if (msg?.kind === 'frame.hello' || msg?.kind === 'frame.cookie') {
+    const tabId = sender.tab?.id;
+    const url = sender.url ?? '';
+    if ((sender.id && sender.id !== chrome.runtime.id) || typeof tabId !== 'number' || !url) {
+      reply(null);
+      return false;
+    }
+    void whenReady().then(() => {
+      if (msg.kind === 'frame.hello') {
+        reply(storageAnswer(tabId, url, false));
+        return;
+      }
+      acceptPageCookie(tabId, typeof msg.value === 'string' ? msg.value : '', url);
+      reply({ ok: true });
+    });
+    return true;
+  }
   if (msg?.kind === 'mask.blocked') {
     if (sender.id && sender.id !== chrome.runtime.id) {
       reply({ error: 'not permitted' });
@@ -4567,7 +5203,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
           pinned: cleanPinned(msg.pinned),
           store: new CookieStore(),
           family: [],
-          forked: [],
+          forked: [FORK_NEVER],
           danger: cleanDanger(msg.danger),
           thirdParty: cleanThirdParty(msg.thirdParty),
           createdAt: Date.now(),
@@ -4630,7 +5266,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
           pinned: [],
           store: new CookieStore(),
           family: [],
-          forked: [],
+          forked: [FORK_NEVER],
           danger: cleanDanger(undefined),
           thirdParty: cleanThirdParty(undefined),
           ephemeral: true,
@@ -4883,7 +5519,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
             pinned: domain ? [domain] : [],
             store: new CookieStore(),
             family: [],
-            forked: [],
+            forked: [FORK_NEVER],
             danger: DEFAULT_DANGER,
     thirdParty: DEFAULT_THIRD_PARTY,
             createdAt: Date.now(),
@@ -5460,7 +6096,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         reply({
           available: canScopeAgent(),
           tabs: [...storageState.entries()].map(([tabId, s]) => ({ tabId, ...s })),
-          forked: registry.listSessions().map((s) => ({ id: s.id, origins: s.forked.length })),
+          forked: registry.listSessions().map((s) => ({ id: s.id, origins: s.forked.filter((o) => o !== FORK_NEVER).length })),
           idb: [...idbSites].sort(),
         });
         return;
@@ -5474,7 +6110,16 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       default:
         reply({ error: 'unknown command' });
     }
-  })();
+  })().catch((e: unknown) => {
+    // A command that throws still answers, with the reason, so the control that
+    // sent it can say so instead of sitting there doing nothing.
+    console.error('[nvx] command failed', msg?.cmd, e);
+    try {
+      reply({ error: e instanceof Error ? e.message : String(e) });
+    } catch {
+      /* already answered before it threw */
+    }
+  });
   return true;
 });
 
@@ -5661,7 +6306,7 @@ Object.assign(globalThis, {
         pinned,
         store: new CookieStore(),
         family: [],
-        forked: [],
+        forked: [FORK_NEVER],
         danger: DEFAULT_DANGER,
         thirdParty: DEFAULT_THIRD_PARTY,
         createdAt: Date.now(),

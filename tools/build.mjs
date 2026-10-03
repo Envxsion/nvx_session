@@ -80,21 +80,6 @@ const tier =
 const proPresent = existsSync(join(ROOT, 'src', 'pro', 'index.ts'));
 const useProCode = (tier === 'pro' || tier === 'dev') && proPresent;
 
-/**
- * ------------------------------------------------------------------
- *  Purpose  |  Whether the listing build carries Persona.
- *  How      |  Section 19 scopes nvx-store to Mirror and Standardize;
- *           |  "isolation plus fingerprint control" can read to a
- *           |  reviewer as two products.
- *  Note     |  Off for the first submission. A per-session fingerprint
- *           |  reads as a second purpose, anti-detection, on top of
- *           |  the single purpose claimed, which risks a single-purpose
- *           |  rejection. Mirror and Standardize still ship. Persona
- *           |  returns as a normal update later. One constant reverts.
- * ------------------------------------------------------------------
- */
-const STORE_INCLUDES_PERSONA = false;
-
 rmSync(DIST, { recursive: true, force: true });
 mkdirSync(DIST, { recursive: true });
 
@@ -166,14 +151,24 @@ if (store) {
   const path = join(DIST, 'manifest.json');
   const m = JSON.parse(readFileSync(path, 'utf8'));
 
-  m.permissions = m.permissions.filter((x) => x !== 'debugger');
-  m.optional_permissions = [...new Set([...(m.optional_permissions ?? []), 'debugger'])];
+  // Ask for nothing the package cannot use, since an unused permission is a
+  // standard rejection reason. The rule-match feedback API is never called. The
+  // debugger only serves Pro features, so a free package drops it outright; a Pro
+  // store package keeps it optional, never granted at install.
+  m.permissions = m.permissions.filter((x) => x !== 'debugger' && x !== 'declarativeNetRequestFeedback');
+  const optional = (m.optional_permissions ?? []).filter((x) => x !== 'debugger');
+  if (tier === 'pro') optional.push('debugger');
+  if (optional.length) m.optional_permissions = optional;
+  else delete m.optional_permissions;
+
+  // The diagnostics page drives a local fixture server, so its shortcut is a
+  // developer affordance that would only open a failing page for a user.
+  if (m.commands) delete m.commands['open-panel'];
 
   delete m.key;
   delete m._comment_key;
+  delete m._comment_commands;
   m.version = STORE_VERSION;
-
-  if (!STORE_INCLUDES_PERSONA) m.nvx_postures = ['mirror', 'standardize'];
 
   /**
    * The telemetry endpoint, and the only place it is ever set.
@@ -196,8 +191,7 @@ if (store) {
 
   writeFileSync(path, `${JSON.stringify(m, null, 2)}\n`);
   console.log(
-    `store manifest: debugger optional, no key, v${m.version}` +
-      (STORE_INCLUDES_PERSONA ? ', persona on' : ', persona off') +
+    `store manifest: ${tier === 'pro' ? 'debugger optional' : 'no debugger'}, no key, v${m.version}` +
       (endpoint ? ', telemetry endpoint set' : ', no telemetry endpoint')
   );
 }
@@ -311,6 +305,20 @@ if (bad.length) {
   console.error('extensionless relative imports would break the module graph:');
   for (const b of bad) console.error(`  ${b}`);
   process.exit(1);
+}
+
+// A store package ships no source maps: they are debugging aids for this repo,
+// not for users, and roughly double the download. The trailing pointer comment
+// goes too, or DevTools would report a missing map on every module.
+if (store) {
+  for (const f of [...walk(DIST)]) {
+    if (f.endsWith('.map')) rmSync(f, { force: true });
+    else if (f.endsWith('.js')) {
+      const text = readFileSync(f, 'utf8');
+      const stripped = text.replace(/\n\/\/# sourceMappingURL=\S+\s*$/, '\n');
+      if (stripped !== text) writeFileSync(f, stripped);
+    }
+  }
 }
 
 const size = totalSize(DIST);

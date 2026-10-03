@@ -525,10 +525,11 @@ function paintConsent() {
     el(
       'p',
       'leak-text',
-      'Send anonymous usage counts: which features get used, how many sessions ' +
-        'exist, nothing more. Tied to a random id, never to you. It can never ' +
-        'contain a URL, a site you visit, a cookie or an account. Off unless you ' +
-        'say yes, and you can change your mind in Settings.'
+      'Send anonymous usage stats: which features get used, rough counts of ' +
+        'sessions and tabs, days since install, error types, and your OS, browser ' +
+        'and version, language and time-zone offset. Tied to a random id, never to ' +
+        'you. It can never contain a URL, a site you visit, a cookie or an account. ' +
+        'Off unless you say yes, and you can change your mind in Settings.'
     )
   );
 
@@ -723,10 +724,8 @@ function paintLeak() {
 
   const look = el('button', 'btn btn--quiet', 'What happened');
   look.type = 'button';
-  look.addEventListener('click', () => {
-    void chrome.tabs.create({ url: chrome.runtime.getURL('diagnostics.html') });
-    window.close();
-  });
+  // The trail names the host the session had no rule for, which is the answer.
+  look.addEventListener('click', () => go('trail'));
 
   // Not "dismiss". The count is a measurement, so the only honest way to clear
   // it is to start measuring again, and the label has to say that or somebody
@@ -945,7 +944,10 @@ new MutationObserver(() => {
  *           |  surface reporting on it.
  * ------------------------------------------------------------------
  */
-document.querySelector('.diag-link')?.addEventListener('click', () => {
+// The suites drive a local fixture server, so only a developer build shows them.
+const diagLink = document.querySelector('.diag-link');
+if (diagLink && chrome.runtime.getManifest().nvx_tier !== 'dev') diagLink.hidden = true;
+diagLink?.addEventListener('click', () => {
   void chrome.tabs.create({ url: chrome.runtime.getURL('diagnostics.html') });
   window.close();
 });
@@ -1235,7 +1237,9 @@ void (async () => {
   // panel.js kicked off its own refresh at load; this waits for state to arrive
   // rather than racing it, then keeps the home view in step with every later
   // repaint the panel does.
-  for (let i = 0; i < 40 && !state.sessions.length; i++) {
+  // Waits for the answer, not for a session: a new user has none, and waiting
+  // for one made every first open sit blank for two seconds.
+  for (let i = 0; i < 40 && !stateLoaded; i++) {
     await new Promise((r) => setTimeout(r, 50));
   }
   paintHome(true);

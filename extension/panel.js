@@ -17,6 +17,8 @@
  */
 
 let state = { sessions: [], bindings: [], desync: null, settings: {}, groupsAvailable: false };
+/** True once the worker has answered at least once, so a view can wait for it. */
+let stateLoaded = false;
 let tabs = [];
 let lastReport = null;
 let chosenColor = COLORS[0];
@@ -550,11 +552,25 @@ function paintChannels() {
       el(
         'small',
         null,
-        'Off by default. Sends only counts and which features ran, tied to a random id, never a URL, a site, a cookie or an account. Turning it off erases that id.'
+        'Off by default. Sends which features ran, rough session and tab counts, days since install, error types, and your OS, browser and version, language and time-zone offset. Tied to a random id, never a URL, a site, a cookie or an account. Turning it off erases that id.'
       )
     );
     row.append(toggle, label);
     node.append(row);
+
+    // The id the privacy page tells people to quote for an export or deletion.
+    // It exists only once stats are on and the first batch has been sent.
+    if (state.settings?.telemetry) {
+      chrome.storage.local
+        .get('nvx.telemetry.id')
+        .then((held) => {
+          const id = held?.['nvx.telemetry.id'];
+          if (typeof id === 'string' && id) {
+            label.append(el('small', 'mono', `Install id: ${id}. Quote it to have your data exported or deleted.`));
+          }
+        })
+        .catch(() => undefined);
+    }
   }
 
   $('channel-note').textContent =
@@ -1159,6 +1175,7 @@ function paintResults(report) {
 async function refresh() {
   const [s, t] = await Promise.all([send({ cmd: 'state' }), send({ cmd: 'tabs' })]);
   state = s ?? state;
+  if (s) stateLoaded = true;
   tabs = t ?? [];
   paintStrip();
   paintSessions();
@@ -1442,7 +1459,16 @@ function paintPro() {
   // present-but-not-unlocking token lands in (expired, or bound to another
   // device), with a line saying so.
   setBadge('Free', 'pro-badge--free');
-  if (lic.present && (lic.reason === 'expired' || lic.reason === 'wrong_device')) {
+  // The key is still stored, but the server said it is not unlocking right now.
+  // Say why, and that it comes back on its own, rather than showing a blank form.
+  const lapseNotes = {
+    paused: 'This licence is paused. Pro comes back on its own once it is resumed; there is no need to enter the key again.',
+    expired: 'This licence has lapsed. When the renewal goes through, Pro comes back on its own. Check status to pick it up now.',
+    not_found: 'The licence server does not recognise this key. If you were charged for it, contact support with your receipt and this key.',
+  };
+  if (lic.present && lapseNotes[lic.lapse]) {
+    node.append(el('p', 'pro-note pro-note--warn', lapseNotes[lic.lapse]));
+  } else if (lic.present && (lic.reason === 'expired' || lic.reason === 'wrong_device')) {
     node.append(
       el(
         'p',
