@@ -233,7 +233,7 @@ describe('compileSession', () => {
 
   it('sends a navigation to an unknown site with no cookies, below every host rule', () => {
     const out = compileSession(session({ activeHosts: ['vercel.com'] }), new RuleIds(), undefined, { now: NOW });
-    const nav = out.rules.filter((r) => r.condition.resourceTypes?.length === 1 && r.condition.resourceTypes[0] === 'main_frame' && !r.condition.requestDomains);
+    const nav = out.rules.filter((r) => r.condition.resourceTypes?.length === 1 && r.condition.resourceTypes[0] === 'main_frame' && !r.condition.requestDomains && !r.condition.responseHeaders);
     expect(nav).toHaveLength(1);
     expect(nav[0]!.condition.tabIds).toEqual([7]);
     expect(setValue(nav[0] as never)).toEqual({ header: 'cookie', operation: 'remove' });
@@ -287,8 +287,8 @@ describe('compileSession', () => {
 
     const out = compileSession(session({ store: s }), new RuleIds(), undefined, { now: NOW });
     // Each host's variants, plus its registrable domain fallback's, plus the
-    // Set-Cookie strip and the unknown-site navigation rule.
-    expect(out.rules.length).toBe(22);
+    // Set-Cookie strip, the redirect hold and the unknown-site navigation rule.
+    expect(out.rules.length).toBe(23);
     expect(out.removeIds).toHaveLength(RULES_PER_SESSION);
     expect(out.overflowed).toEqual([]);
     expect(new Set(out.rules.map((r) => r.id)).size).toBe(out.rules.length);
@@ -769,5 +769,21 @@ describe('fallbacks for deeper cookie domains', () => {
     expect(deep[0]!.priority).toBeGreaterThan(shallow[0]!.priority);
     const host = out.rules.find((r) => r.condition.urlFilter === '|https://console.aws.amazon.com^');
     expect(host!.priority).toBeGreaterThan(deep[0]!.priority);
+  });
+});
+
+describe('the redirect hold', () => {
+  it('takes the Location off a page-load redirect that sets a cookie, in managed tabs only', () => {
+    const out = compileSession(session(), new RuleIds(), undefined, { now: NOW });
+    const hold = out.rules.filter((r) => r.condition.responseHeaders?.some((h) => h.header === 'set-cookie'));
+    expect(hold).toHaveLength(1);
+    expect(hold[0]!.condition.resourceTypes).toEqual(['main_frame']);
+    expect(hold[0]!.condition.tabIds).toEqual([7]);
+    expect(hold[0]!.action.responseHeaders).toEqual([{ header: 'location', operation: 'remove' }]);
+  });
+
+  it('can be turned off', () => {
+    const out = compileSession(session(), new RuleIds(), undefined, { now: NOW, holdRedirects: false });
+    expect(out.rules.some((r) => r.condition.responseHeaders)).toBe(false);
   });
 });

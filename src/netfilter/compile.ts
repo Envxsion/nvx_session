@@ -374,7 +374,7 @@ function catchAllRule(tabIds: number[], id: number): Rule {
  * ------------------------------------------------------------------
  */
 /** Registrable domains whose job is signing people in. */
-const IDENTITY_PROVIDERS = new Set([
+export const IDENTITY_PROVIDERS: ReadonlySet<string> = new Set([
   'google.com',
   'youtube.com',
   'microsoftonline.com',
@@ -393,6 +393,30 @@ const IDENTITY_PROVIDERS = new Set([
   'pingone.com',
   'facebook.com',
   'github.com',
+  'okta-gov.com',
+  'oktacdn.com',
+  'microsoftonline-p.com',
+  'msauth.net',
+  'msftauth.net',
+  'login.gov',
+  'signin.aws',
+  'awsapps.com',
+  'yandex.ru',
+  'yandex.com',
+  'naver.com',
+  'kakao.com',
+  'line.me',
+  'yahoo.co.jp',
+  'yahoo.com',
+  'qq.com',
+  'alipay.com',
+  'taobao.com',
+  'vk.com',
+  'mail.ru',
+  'salesforce.com',
+  'force.com',
+  'jumpcloud.com',
+  'cloudflareaccess.com',
 ]);
 
 function thirdPartyRule(tabIds: number[], id: number, allowed: string[] = []): Rule {
@@ -505,6 +529,33 @@ function setCookieRule(tabIds: number[], id: number): Rule {
       ],
     },
     condition: { tabIds, resourceTypes: ALL_TYPES },
+  };
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Hold a page-load redirect that sets a cookie until the
+ *           |  cookie is in the rules.
+ *  Why      |  The browser follows a redirect the moment it arrives, and
+ *           |  a rule cannot land that fast, so the next hop went without
+ *           |  the cookie it was just given. Replaying a hop afterwards
+ *           |  only works when the replay does not set a new cookie of
+ *           |  its own; a chain where every hop does (Moodle's sign-in)
+ *           |  raced forever. Taking the Location off such a response
+ *           |  lets the page settle where it is; the worker reads the
+ *           |  original header, installs the cookies, and sends the tab
+ *           |  on itself. No race left to lose.
+ * ------------------------------------------------------------------
+ */
+function holdRedirectRule(tabIds: number[], id: number): Rule {
+  return {
+    id,
+    priority: PRIORITY_CATCH_ALL,
+    action: {
+      type: 'modifyHeaders',
+      responseHeaders: [{ header: 'location', operation: 'remove' }],
+    },
+    condition: { tabIds, resourceTypes: ['main_frame'], responseHeaders: [{ header: 'set-cookie' }] },
   };
 }
 
@@ -752,6 +803,7 @@ export function compileSession(
   // may drop a background host, never the rule that keeps the jar clean.
   if (session.tabIds.length) {
     rules.push(setCookieRule([...session.tabIds], nextId()));
+    if (opts.holdRedirects !== false) rules.push(holdRedirectRule([...session.tabIds], nextId()));
   }
 
   const targets: { host: string; fallback: boolean }[] = [

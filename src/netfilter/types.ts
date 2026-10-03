@@ -71,6 +71,8 @@ export interface CompileOptions {
   now?: number;
   /** Rules this session may install; the engine shares the pool between sessions with tabs. */
   budget?: number;
+  /** Hold page-load redirects that set cookies until the cookies are in. On unless false. */
+  holdRedirects?: boolean;
   strictOnTopLevel?: boolean;
   /**
    * Rules are compiled before any request exists, so the scheme has to be
@@ -151,6 +153,8 @@ export interface RuleCondition {
    * and an uncovered request is one that carries the real browser.
    */
   excludedResourceTypes?: ResourceType[];
+  /** Matched against the response, Chrome 128 onwards. Any one listed matches. */
+  responseHeaders?: { header: string; values?: string[]; excludedValues?: string[] }[];
 }
 
 export interface RuleAction {
