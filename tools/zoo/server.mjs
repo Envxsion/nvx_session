@@ -676,6 +676,82 @@ const scenarios = {
     finish(t, problems.length === 0, problems.length ? '' : u, problems.join('; '));
     return send(res, 200, donePage(t));
   },
+  /**
+   * Moodle and Okta: a service provider that, finding no session, starts a
+   * fresh SAML sign-in every time, against a provider that is already signed
+   * in and posts straight back. A missed session cookie is not an error page
+   * here, it is another lap, and a fix that arrives late only adds laps.
+   */
+  async samlloop(req, res, url, t, u) {
+    const c = cookiesOf(req);
+    const host = req.headers.host;
+    const run = runs.get(t) ?? { steps: [], result: null };
+    if (host === 'app.test' && (url.pathname.endsWith('/start') || url.pathname.endsWith('/my'))) {
+      record(t, url.pathname.endsWith('/start') ? 'start' : 'my', req);
+      if (c.zsl_sess) {
+        finish(t, (run.laps ?? 0) <= 2, userOf(c.zsl_sess), (run.laps ?? 0) <= 2 ? '' : `signed in only after ${run.laps} laps`);
+        return send(res, 200, donePage(t));
+      }
+      run.laps = (run.laps ?? 0) + 1;
+      runs.set(t, run);
+      if (run.laps > 8) {
+        finish(t, false, '', `looped ${run.laps} times between the service and the provider`);
+        return send(res, 200, donePage(t));
+      }
+      const req2 = Math.random().toString(36).slice(2, 10);
+      return redirect(res, `https://idp.test/z/samlloop/sso?t=${t}&u=${u}&r=${req2}`, [
+        `zsl_state_${req2}=1; ${SEC}; HttpOnly; SameSite=None`,
+      ]);
+    }
+    if (host === 'idp.test' && url.pathname.endsWith('/sso')) {
+      record(t, 'sso', req);
+      const r = url.searchParams.get('r');
+      // Signed in already: the provider's own cookie, set on the first lap.
+      return send(res, 200, page(`<form id="f" method="post" action="https://app.test/z/samlloop/acs?t=${t}&r=${r}">
+        <input type="hidden" name="SAMLResponse" value="${u}"></form><script>document.getElementById('f').submit()</script>`), {
+        'set-cookie': [`zsl_idp=${ident(u)}; ${SEC}; HttpOnly; SameSite=None`],
+      });
+    }
+    if (url.pathname.endsWith('/acs')) {
+      record(t, 'acs', req);
+      const r = url.searchParams.get('r');
+      const body = await readBody(req);
+      if (!c[`zsl_state_${r}`]) {
+        // State lost: start over, as an SP that cannot match the response does.
+        return redirect(res, `/z/samlloop/my?t=${t}`, [], 303);
+      }
+      return redirect(res, `/z/samlloop/my?t=${t}`, [`zsl_sess=${ident(body.get('SAMLResponse') ?? '')}; ${SEC}; HttpOnly; SameSite=None`], 303);
+    }
+    return send(res, 404, page('no'));
+  },
+  /**
+   * A load balancer that rotates a cookie on every response and accepts the
+   * previous value, as Monash's does, through a six-hop redirect chain. The
+   * session cookie is set once. NVX must not take a rotation for a miss: each
+   * hop should be asked for once, or retries chase the rotation forever.
+   */
+  async rotating(req, res, url, t, u) {
+    const c = cookiesOf(req);
+    const n = Number(url.searchParams.get('n') ?? 0);
+    const run = runs.get(t) ?? { steps: [], result: null };
+    run.hits = run.hits ?? {};
+    run.hits[n] = (run.hits[n] ?? 0) + 1;
+    runs.set(t, run);
+    const lb = `zlb=${Math.random().toString(36).slice(2)}; ${SEC}; SameSite=Lax`;
+    if (url.pathname.endsWith('/start')) {
+      record(t, 'start', req);
+      return redirect(res, `/z/rotating/hop?t=${t}&n=1`, [lb, `zrt_sid=${ident(u)}; ${SEC}; HttpOnly; SameSite=Lax`]);
+    }
+    if (n < 6) {
+      record(t, `hop${n}`, req);
+      return redirect(res, `/z/rotating/hop?t=${t}&n=${n + 1}`, [lb]);
+    }
+    record(t, 'end', req);
+    const repeats = Object.entries(run.hits).filter(([k, v]) => k !== '0' && v > 2).map(([k]) => k);
+    const ok = Boolean(c.zrt_sid) && repeats.length === 0;
+    finish(t, ok, userOf(c.zrt_sid), !c.zrt_sid ? 'session cookie lost in the chain' : repeats.length ? `hops asked for again and again: ${repeats.join(',')}` : '');
+    return send(res, 200, donePage(t));
+  },
 };
 
 /** The cookie that names the signed-in user, per scenario, for the isolation check. */
@@ -698,6 +774,8 @@ const IDENTITY = {
   xdomain: ['d.test', 'zxd_sid'],
   qrpoll: ['app.test', 'zq_sid'],
   prerender: ['app.test', 'zpr_sid'],
+  samlloop: ['app.test', 'zsl_sess'],
+  rotating: ['app.test', 'zrt_sid'],
 };
 
 // ---------------------------------------------------------------- server
