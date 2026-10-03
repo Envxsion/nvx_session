@@ -20,12 +20,15 @@
 import { emit, type EmitOptions } from '../jar/emit.js';
 import type { CookieStore } from '../jar/store.js';
 import { contextFor } from '../observer/capture.js';
+import { initiatorOf } from '../platform.js';
 
 export interface RequestDetails {
   tabId: number;
   url: string;
   type?: string | undefined;
   initiator?: string | undefined;
+  /** Firefox's equivalent of initiator, as a full url. */
+  originUrl?: string | undefined;
   /** Present on every real event; the guard is the only thing that reads it. */
   method?: string | undefined;
   requestHeaders?: HttpHeader[] | undefined;
@@ -57,6 +60,18 @@ export interface RewriteResult {
 const COOKIE = 'cookie';
 
 /**
+ * Chromium needs 'extraHeaders' to see or change the Cookie header; Firefox has
+ * no such option and throws on an unknown one, so it is added only where the
+ * browser declares it.
+ */
+export function extraHeaders(): 'extraHeaders'[] {
+  const wr = (globalThis as { chrome?: { webRequest?: unknown } }).chrome?.webRequest as
+    | { OnBeforeSendHeadersOptions?: { EXTRA_HEADERS?: string } }
+    | undefined;
+  return wr?.OnBeforeSendHeadersOptions?.EXTRA_HEADERS ? ['extraHeaders'] : [];
+}
+
+/**
  * ------------------------------------------------------------------
  *  Purpose  |  Compute the headers a managed request should carry.
  *  Note     |  Null (unowned) means leave it alone. Distinct from an
@@ -68,7 +83,7 @@ const COOKIE = 'cookie';
 export function rewriteHeaders(
   details: RequestDetails,
   resolve: Resolve,
-  opts: EmitOptions = {}
+  opts: EmitOptions & { stripRequest?: () => string[] } = {}
 ): RewriteResult | null {
   const owner = resolve(details);
   if (!owner) return null;
@@ -83,7 +98,8 @@ export function rewriteHeaders(
   const context = contextFor({
     ...(details.type !== undefined ? { type: details.type } : {}),
     url: details.url,
-    ...(details.initiator !== undefined ? { initiator: details.initiator } : {}),
+    // Firefox reports originUrl rather than initiator; SameSite needs either.
+    ...(initiatorOf(details) !== undefined ? { initiator: initiatorOf(details) } : {}),
   });
 
   // The method matters: a cross-site POST must not carry SameSite=Lax, and
@@ -92,7 +108,8 @@ export function rewriteHeaders(
     ...opts,
     ...(details.method ? { method: details.method } : {}),
   }).header;
-  const others = (details.requestHeaders ?? []).filter((h) => h.name.toLowerCase() !== COOKIE);
+  const drop = new Set([COOKIE, ...(opts.stripRequest?.() ?? [])]);
+  const others = (details.requestHeaders ?? []).filter((h) => !drop.has(h.name.toLowerCase()));
   const headers = header ? [...others, { name: 'Cookie', value: header }] : others;
 
   return { headers, sessionId: owner.id, header };
@@ -108,6 +125,8 @@ export interface BlockingApi {
 }
 
 export interface BlockingOptions extends EmitOptions {
+  /** Extra request headers to remove from an owned request (a site pack's). */
+  stripRequest?: () => string[];
   /** Reports every rewrite, so the same leak accounting applies to both backends. */
   onRewrite?: (result: RewriteResult, details: RequestDetails) => void;
   onError?: (err: unknown, details: RequestDetails) => void;
@@ -163,7 +182,7 @@ export class BlockingNetfilter {
       this.listener,
       { urls: ['http://*/*', 'https://*/*'] },
       // extraHeaders is required or the Cookie header is not visible to modify.
-      ['blocking', 'requestHeaders', 'extraHeaders']
+      ['blocking', 'requestHeaders', ...extraHeaders()]
     );
   }
 
@@ -219,7 +238,15 @@ export function browserBlockingApi(): BlockingApi | null {
  */
 export function blockingIsReal(): boolean {
   try {
-    return chrome.runtime.getManifest().manifest_version === 2;
+    const m = chrome.runtime.getManifest() as { manifest_version: number; permissions?: string[] };
+    if (m.manifest_version === 2) return true;
+    // Firefox kept blocking webRequest in MV3, and a listener's answer is
+    // really applied there, so its build uses this backend: no rule ceiling,
+    // no flush race. Chromium MV3 accepts the listener and ignores it, which
+    // is why this is gated on Gecko and not on the API being present.
+    const gecko = typeof (globalThis as { browser?: { runtime?: { getBrowserInfo?: unknown } } }).browser
+      ?.runtime?.getBrowserInfo === 'function';
+    return gecko && (m.permissions ?? []).includes('webRequestBlocking');
   } catch {
     return false;
   }

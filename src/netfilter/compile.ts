@@ -373,8 +373,8 @@ function catchAllRule(tabIds: number[], id: number): Rule {
  *           |  identity provider still works, keeping SSO intact.
  * ------------------------------------------------------------------
  */
-/** Registrable domains whose job is signing people in. */
-export const IDENTITY_PROVIDERS: ReadonlySet<string> = new Set([
+/** Registrable domains whose job is signing people in. Extended at run time by a site pack. */
+const IDENTITY_PROVIDER_SET = new Set<string>([
   'google.com',
   'youtube.com',
   'microsoftonline.com',
@@ -418,6 +418,57 @@ export const IDENTITY_PROVIDERS: ReadonlySet<string> = new Set([
   'jumpcloud.com',
   'cloudflareaccess.com',
 ]);
+export const IDENTITY_PROVIDERS: ReadonlySet<string> = IDENTITY_PROVIDER_SET;
+const BUILTIN_IDPS: ReadonlySet<string> = new Set(IDENTITY_PROVIDER_SET);
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  What a Pro site pack adds to the built-in knowledge.
+ *  How      |  Replaced whole on every pack, so an entry the pack drops
+ *           |  (or a pack that is cleared when the licence lapses) is
+ *           |  gone again. Built-in providers are never removed: a pack
+ *           |  can only add. Header names arrive already checked by
+ *           |  kernel/pack.ts.
+ * ------------------------------------------------------------------
+ */
+let packResponseStrips: string[] = [];
+let packRequestStrips: string[] = [];
+
+/**
+ * Response headers a managed tab never lets through: Set-Cookie (the session's
+ * cookies stay out of the browser's own jar) and the ones the browser acts on
+ * with the profile's own state. Device bound session registration would bind
+ * the session's Google cookies to the profile, and the account consistency ones
+ * would add the session's account to Chrome's own sign-in, or sign the profile
+ * out. One list for both backends: the declarative rule below, and the
+ * blocking listener a manifest v2 build (Firefox) strips with.
+ */
+const BUILTIN_RESPONSE_STRIPS = [
+  'set-cookie',
+  'secure-session-registration',
+  'sec-session-registration',
+  'sec-session-challenge',
+  'google-accounts-signin',
+  'google-accounts-signout',
+  'x-chrome-manage-accounts',
+];
+export function responseStripHeaders(): string[] {
+  return [...BUILTIN_RESPONSE_STRIPS, ...packResponseStrips];
+}
+/** Request headers a site pack names, removed from a managed tab's requests. */
+export function requestStripHeaders(): string[] {
+  return [...packRequestStrips];
+}
+export function setPackExtras(extras: {
+  idps?: readonly string[];
+  responseHeaders?: readonly string[];
+  requestHeaders?: readonly string[];
+}): void {
+  for (const d of [...IDENTITY_PROVIDER_SET]) if (!BUILTIN_IDPS.has(d)) IDENTITY_PROVIDER_SET.delete(d);
+  for (const d of extras.idps ?? []) IDENTITY_PROVIDER_SET.add(d);
+  packResponseStrips = [...(extras.responseHeaders ?? [])];
+  packRequestStrips = [...(extras.requestHeaders ?? [])];
+}
 
 function thirdPartyRule(tabIds: number[], id: number, allowed: string[] = []): Rule {
   // Excluded on the rule rather than answered by a higher priority one of its
@@ -514,19 +565,12 @@ function setCookieRule(tabIds: number[], id: number): Rule {
     priority: PRIORITY_CATCH_ALL,
     action: {
       type: 'modifyHeaders',
-      responseHeaders: [
-        { header: 'set-cookie', operation: 'remove' },
-        // Headers the browser acts on with the profile's own state. Device
-        // bound session registration would bind the session's Google cookies
-        // to the profile, and the account consistency ones would add the
-        // session's account to Chrome's own sign-in, or sign the profile out.
-        { header: 'secure-session-registration', operation: 'remove' },
-        { header: 'sec-session-registration', operation: 'remove' },
-        { header: 'sec-session-challenge', operation: 'remove' },
-        { header: 'google-accounts-signin', operation: 'remove' },
-        { header: 'google-accounts-signout', operation: 'remove' },
-        { header: 'x-chrome-manage-accounts', operation: 'remove' },
-      ],
+      responseHeaders: responseStripHeaders().map((header) => ({ header, operation: 'remove' as const })),
+      ...(packRequestStrips.length
+        ? {
+            requestHeaders: packRequestStrips.map((header) => ({ header, operation: 'remove' as const })),
+          }
+        : {}),
     },
     condition: { tabIds, resourceTypes: ALL_TYPES },
   };

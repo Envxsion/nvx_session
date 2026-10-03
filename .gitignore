@@ -14,3 +14,5 @@ tools/fixture/reports/
 # zoo certificate and run reports (regenerated)
 tools/zoo/.cert/
 tools/zoo/reports/
+dist-firefox/
+release/

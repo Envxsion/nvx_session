@@ -222,13 +222,39 @@ describe('BlockingNetfilter', () => {
   });
 
   it('asks for the options the rewrite actually needs', () => {
-    const added = vi.fn();
-    const api: BlockingApi = { addListener: added, removeListener: vi.fn() };
-    new BlockingNetfilter(api, () => null).install();
-    const [, filter, extra] = added.mock.calls[0]!;
-    expect(filter).toEqual({ urls: ['http://*/*', 'https://*/*'] });
-    // Without extraHeaders the Cookie header is not even visible to modify.
-    expect(extra).toEqual(['blocking', 'requestHeaders', 'extraHeaders']);
+    // Chromium declares extraHeaders, and without it the Cookie header is not
+    // even visible to modify.
+    vi.stubGlobal('chrome', { webRequest: { OnBeforeSendHeadersOptions: { EXTRA_HEADERS: 'extraHeaders' } } });
+    try {
+      const added = vi.fn();
+      const api: BlockingApi = { addListener: added, removeListener: vi.fn() };
+      new BlockingNetfilter(api, () => null).install();
+      const [, filter, extra] = added.mock.calls[0]!;
+      expect(filter).toEqual({ urls: ['http://*/*', 'https://*/*'] });
+      expect(extra).toEqual(['blocking', 'requestHeaders', 'extraHeaders']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('leaves extraHeaders out where the browser has no such option (Firefox throws on it)', () => {
+    vi.stubGlobal('chrome', { webRequest: { OnBeforeSendHeadersOptions: { BLOCKING: 'blocking' } } });
+    try {
+      const added = vi.fn();
+      new BlockingNetfilter({ addListener: added, removeListener: vi.fn() }, () => null).install();
+      expect(added.mock.calls[0]![2]).toEqual(['blocking', 'requestHeaders']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('reads Firefox originUrl as the initiator, so SameSite still sees cross-site', () => {
+    const store = jar('https://example.com', 'strict=1; Secure; SameSite=Strict');
+    const owner = () => ({ id: 's', store });
+    // Same site by originUrl: the Strict cookie goes.
+    expect(rewriteHeaders(req({ originUrl: 'https://example.com/a' }), owner)?.header).toContain('strict=1');
+    // Cross site by originUrl alone (Firefox sends no initiator): it does not.
+    expect(rewriteHeaders(req({ originUrl: 'https://other.test/page' }), owner)?.header ?? '').not.toContain('strict=1');
   });
 
   it('reports a throw rather than silently sending the profile jar', () => {

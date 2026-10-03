@@ -193,3 +193,56 @@ export async function fetchInPage(
 export function canScopeAgent(): boolean {
   return manifestVersion() === 3 && Boolean(chrome.scripting?.registerContentScripts);
 }
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether this is Firefox (Gecko), not a Chromium fork.
+ *  How      |  runtime.getBrowserInfo exists only in Firefox; every
+ *           |  Chromium fork (Edge, Brave, Opera, Vivaldi, Arc) lacks
+ *           |  it whatever its user agent says.
+ * ------------------------------------------------------------------
+ */
+export function isGecko(): boolean {
+  const b = (globalThis as { browser?: { runtime?: { getBrowserInfo?: unknown } } }).browser;
+  return typeof b?.runtime?.getBrowserInfo === 'function';
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  The origin that started a request, as Chromium's
+ *           |  `initiator` reports it, on every browser.
+ *  How      |  Chromium gives `initiator`. Firefox gives `originUrl`
+ *           |  (a full url) instead, so its origin is used. A request
+ *           |  started by the browser itself (address bar, about:
+ *           |  pages) or by this extension has none, exactly as in
+ *           |  Chromium, where tabs.update carries no initiator.
+ * ------------------------------------------------------------------
+ */
+export function initiatorOf(d: { initiator?: string | undefined; originUrl?: string | undefined }): string | undefined {
+  if (d.initiator) return d.initiator;
+  const from = d.originUrl;
+  if (!from || /^(?:about:|moz-extension:|chrome:|resource:)/i.test(from)) return undefined;
+  try {
+    const origin = new URL(from).origin;
+    return origin === 'null' ? undefined : origin;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  A content script registration this browser accepts.
+ *  Note     |  Firefox rejects matchOriginAsFallback (a Chromium-only
+ *           |  key), and an unknown key fails the whole registration,
+ *           |  which would leave every managed tab without its agent.
+ *           |  matchAboutBlank is its nearest equivalent there.
+ * ------------------------------------------------------------------
+ */
+export function portableScripts<T extends { matchOriginAsFallback?: boolean }>(scripts: T[]): T[] {
+  if (!isGecko()) return scripts;
+  return scripts.map((s) => {
+    const { matchOriginAsFallback, ...rest } = s;
+    return (matchOriginAsFallback ? { ...rest, matchAboutBlank: true } : rest) as T;
+  });
+}

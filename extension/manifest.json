@@ -64,6 +64,9 @@
     "contextMenus",
     "unlimitedStorage"
   ],
+  "externally_connectable": {
+    "matches": ["https://session.nvx.sh/*", "https://nvx.sh/*"]
+  },
   "host_permissions": [
     "<all_urls>"
   ]

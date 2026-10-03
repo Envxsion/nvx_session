@@ -54,7 +54,20 @@ const mv2 = process.argv.includes('--mv2');
  * ------------------------------------------------------------------
  */
 const store = process.argv.includes('--store');
-const DIST = join(ROOT, mv2 ? 'dist-mv2' : store ? 'dist-store' : 'dist');
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  The Firefox package (addons.mozilla.org).
+ *  How      |  The MV3 manifest, reshaped for Gecko: an event page
+ *           |  (background.scripts) instead of a service worker, the
+ *           |  blocking webRequest permission Firefox kept in MV3 (the
+ *           |  worker then picks the blocking backend, see
+ *           |  blockingIsReal), a gecko id, and no Chromium-only keys.
+ *           |  Always a store-shaped build: no key, no debugger.
+ *  Note     |  node tools/build.mjs --firefox -> dist-firefox/
+ * ------------------------------------------------------------------
+ */
+const firefox = process.argv.includes('--firefox');
+const DIST = join(ROOT, firefox ? 'dist-firefox' : mv2 ? 'dist-mv2' : store ? 'dist-store' : 'dist');
 
 /**
  * ------------------------------------------------------------------
@@ -67,7 +80,22 @@ const DIST = join(ROOT, mv2 ? 'dist-mv2' : store ? 'dist-store' : 'dist');
  */
 const explicitTier = process.env.NVX_TIER;
 const tier =
-  explicitTier === 'pro' ? 'pro' : explicitTier === 'free' ? 'free' : store ? 'free' : 'dev';
+  explicitTier === 'pro' ? 'pro' : explicitTier === 'free' ? 'free' : store || firefox ? 'free' : 'dev';
+
+/**
+ * What the worker needs to know about this build: tier, telemetry endpoint and
+ * licence material. Written as a compiled module (dist/src/build-config.js),
+ * not as manifest keys, which the browser lists as unrecognised.
+ */
+const BUILD_CONFIG = { tier, telemetryEndpoint: null, reportEndpoint: null, license: null };
+
+// Problem reports. Set like the telemetry endpoint, and https only.
+if (process.env.NVX_REPORT_URL) {
+  if (!/^https:\/\//.test(process.env.NVX_REPORT_URL)) {
+    throw new Error(`NVX_REPORT_URL must be https, got: ${process.env.NVX_REPORT_URL}`);
+  }
+  BUILD_CONFIG.reportEndpoint = process.env.NVX_REPORT_URL;
+}
 /**
  * ------------------------------------------------------------------
  *  Purpose  |  Whether the private `pro` submodule is checked out.
@@ -147,6 +175,52 @@ if (mv2) {
 }
 rmSync(join(DIST, 'manifest.mv2.json'), { force: true });
 
+if (firefox) {
+  const path = join(DIST, 'manifest.json');
+  const m = JSON.parse(readFileSync(path, 'utf8'));
+  m.background = { scripts: ['src/bg/index.js'], type: 'module' };
+  // Chromium-only, or meaningless on Firefox: the pinned id key, the Chrome
+  // version floor, website messaging (Firefox has no externally_connectable,
+  // so the site's one-click key handoff falls back to pasting the key), and
+  // the debugger (no such API on Firefox).
+  for (const k of ['key', '_comment_key', '_comment_commands', 'minimum_chrome_version', 'externally_connectable']) {
+    delete m[k];
+  }
+  m.permissions = [
+    ...new Set([
+      ...(m.permissions ?? []).filter((x) => x !== 'debugger' && x !== 'declarativeNetRequestFeedback'),
+      'webRequestBlocking',
+    ]),
+  ];
+  const optional = (m.optional_permissions ?? []).filter((x) => x !== 'debugger');
+  if (optional.length) m.optional_permissions = optional;
+  else delete m.optional_permissions;
+  if (m.commands) delete m.commands['open-panel'];
+  m.version = STORE_VERSION;
+  m.browser_specific_settings = {
+    gecko: {
+      id: 'session@nvx.sh',
+      // 128: scripting world MAIN, storage.session and DNR session rules with
+      // tab ids, all of which the worker uses. Ed25519 (licence tokens) needs
+      // 129; on 128 a token simply does not verify and the install stays free.
+      strict_min_version: '128.0',
+      // AMO's required declaration. Nothing is collected unless the user opts
+      // in to anonymous telemetry, which is technical and interaction data.
+      data_collection_permissions: {
+        required: ['none'],
+        optional: ['technicalAndInteraction'],
+      },
+    },
+  };
+  const endpoint = process.env.NVX_TELEMETRY_URL;
+  if (endpoint) {
+    if (!/^https:\/\//.test(endpoint)) throw new Error(`NVX_TELEMETRY_URL must be https, got: ${endpoint}`);
+    BUILD_CONFIG.telemetryEndpoint = endpoint;
+  }
+  writeFileSync(path, `${JSON.stringify(m, null, 2)}\n`);
+  console.log(`firefox manifest: event page, blocking webRequest, gecko id ${m.browser_specific_settings.gecko.id}, v${m.version}`);
+}
+
 if (store) {
   const path = join(DIST, 'manifest.json');
   const m = JSON.parse(readFileSync(path, 'utf8'));
@@ -186,7 +260,7 @@ if (store) {
     if (!/^https:\/\//.test(endpoint)) {
       throw new Error(`NVX_TELEMETRY_URL must be https, got: ${endpoint}`);
     }
-    m.nvx_telemetry = { endpoint };
+    BUILD_CONFIG.telemetryEndpoint = endpoint;
   }
 
   writeFileSync(path, `${JSON.stringify(m, null, 2)}\n`);
@@ -228,7 +302,8 @@ if (store) {
    * package to test the gate itself.
    */
   // tier is computed once near the top, because the compile step needs it too.
-  m.nvx_tier = tier;
+  delete m.nvx_tier;
+  delete m.nvx_telemetry;
 
   if (tier === 'pro') {
     const url = process.env.NVX_LICENSE_URL;
@@ -245,7 +320,7 @@ if (store) {
       }
     }
     if (url || keys) {
-      m.nvx_license = { ...(url ? { endpoint: url } : {}), ...(keys ? { keys } : {}) };
+      BUILD_CONFIG.license = { ...(url ? { endpoint: url } : {}), ...(keys ? { keys } : {}) };
     }
     // The CDP features (exact mode, worker isolation) need the debugger permission
     // GRANTED, because nothing requests it at runtime, so it stays in `permissions`
@@ -255,8 +330,12 @@ if (store) {
     // whose Pro features attach a debugger. Making it a clean optional prompt is a
     // pre-store-submission refinement: add a chrome.permissions.request when the
     // user turns exact mode on, then move it back to optional here.
-    m.permissions = [...new Set([...(m.permissions ?? []), 'debugger'])];
-    m.optional_permissions = (m.optional_permissions ?? []).filter((x) => x !== 'debugger');
+    // Optional, and requested when somebody turns on a feature that attaches
+    // one (exact mode, worker isolation). A required debugger permission is a
+    // frightening install prompt and a harder store review for a capability
+    // most people never use.
+    m.permissions = (m.permissions ?? []).filter((x) => x !== 'debugger');
+    if (!firefox) m.optional_permissions = [...new Set([...(m.optional_permissions ?? []), 'debugger'])];
   } else if (tier === 'dev') {
     // Dev unlocks every feature and needs the debugger granted for exact mode's
     // CDP attach, the same as pro, so it stays in `permissions`, not optional.
@@ -269,7 +348,12 @@ if (store) {
     delete m.nvx_license;
   }
 
+  delete m.nvx_license;
   writeFileSync(path, `${JSON.stringify(m, null, 2)}\n`);
+  writeFileSync(
+    join(DIST, 'src', 'build-config.js'),
+    `// Written by tools/build.mjs. See src/build-config.ts.\nexport const BUILD = ${JSON.stringify(BUILD_CONFIG)};\n`
+  );
   console.log(
     `tier: ${tier}` +
       (tier === 'pro'
@@ -285,6 +369,8 @@ if (store) {
 // extension and anything else built on packages/ui cannot drift apart.
 mkdirSync(join(DIST, 'ui'), { recursive: true });
 cpSync(join(ROOT, 'packages', 'ui', 'tokens.css'), join(DIST, 'ui', 'tokens.css'));
+cpSync(join(ROOT, 'packages', 'ui', 'fonts'), join(DIST, 'ui', 'fonts'), { recursive: true });
+cpSync(join(ROOT, 'packages', 'ui', 'mark.js'), join(DIST, 'ui', 'mark.js'));
 
 // Every relative import tsc emits must already carry a .js extension, because
 // the browser resolves module specifiers literally. A missing extension fails

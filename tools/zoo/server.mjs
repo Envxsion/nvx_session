@@ -802,6 +802,12 @@ const server = createHttps(certificate(), async (req, res) => {
       return send(res, 200, donePage(t));
     }
     if (url.pathname === '/favicon.ico') return send(res, 204, '');
+    // A page with one link, for tools/ask-check.mjs: the link is what a user
+    // follows from a page (or a search result), on any mapped host.
+    if (url.pathname === '/z/link') {
+      const to = url.searchParams.get('to') ?? '/';
+      return send(res, 200, page(`<a id="l" href="${to.replace(/[^\w:/.?=&%-]/g, '')}">go</a>`));
+    }
     const name = url.pathname.split('/')[2];
     const handler = scenarios[name];
     if (!handler) return send(res, 404, page('no such scenario'));
