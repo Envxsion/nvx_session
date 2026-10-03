@@ -23,10 +23,14 @@ const node = (tag, className, text) => el(tag, className, text);
 /** Parses a figure once and returns a node, or null if it will not parse. */
 function figureNode(svg) {
   if (typeof svg !== 'string' || !svg.trim()) return null;
-  const tpl = document.createElement('template');
-  tpl.innerHTML = svg.trim();
-  const first = tpl.content.firstElementChild;
-  return first && first.tagName.toLowerCase() === 'svg' ? first : null;
+  // Parsed as SVG rather than assigned to innerHTML: the figures are static
+  // strings from guide-data.js either way, but store reviewers (Firefox's
+  // linter among them) flag every innerHTML assignment.
+  const source = svg.trim().replace(/^<svg(?![^>]*\sxmlns=)/, '<svg xmlns="http://www.w3.org/2000/svg"');
+  const doc = new DOMParser().parseFromString(source, 'image/svg+xml');
+  const first = doc.documentElement;
+  if (!first || first.tagName.toLowerCase() !== 'svg' || doc.querySelector('parsererror')) return null;
+  return document.importNode(first, true);
 }
 
 function figureBox(svg) {

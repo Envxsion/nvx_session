@@ -26,9 +26,31 @@ body::before {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(120% 70% at 50% -12%, rgba(220, 234, 79, 0.045), transparent 62%),
-    radial-gradient(rgba(239, 240, 234, 0.02) 0.9px, transparent 0.9px);
-  background-size: auto, 7px 7px;
+    radial-gradient(60vmax 50vmax at 92% -10%, rgba(220, 234, 79, 0.07), transparent 64%),
+    radial-gradient(50vmax 40vmax at -10% 110%, rgba(220, 234, 79, 0.03), transparent 70%);
+}
+
+/* Grain, fixed and inert, so the ground is a material and never repaints. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* tokens.css sets [data-label] as tracked capitals; on these pages a label is
+   a quiet line of the reading face instead. */
+[data-label] {
+  font-family: var(--font-sans);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--mute-5);
 }
 
 /* ------------------------------------------------------------------ page */
@@ -49,20 +71,21 @@ body::before {
 
 .eyebrow {
   font-family: var(--font-mono);
-  font-weight: 300;
-  font-size: 10px;
-  letter-spacing: 0.22em;
+  font-weight: 400;
+  font-size: 11px;
   color: var(--signal);
   margin: 0 0 16px;
 }
 
 h1 {
   font-family: var(--font-display);
-  font-weight: 500;
-  font-size: clamp(30px, 4.4vw, 44px);
-  line-height: 1.04;
-  letter-spacing: -0.014em;
+  font-stretch: 112%;
+  font-weight: 600;
+  font-size: clamp(30px, 4.4vw, 48px);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
   margin: 0 0 20px;
+  text-wrap: balance;
 }
 
 .strip {
@@ -72,7 +95,7 @@ h1 {
   font-family: var(--font-mono);
   font-weight: 300;
   font-size: 10px;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.01em;
   color: var(--mute-5);
 }
 .strip b {
@@ -104,12 +127,12 @@ h1 {
   border-bottom: 1px solid var(--edge);
 }
 .block-head h2 {
-  font-family: var(--font-mono);
-  font-weight: 300;
-  font-size: 10px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--fg-4);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-stretch: 108%;
+  font-size: 15px;
+  letter-spacing: -0.015em;
+  color: var(--fg);
   margin: 0;
   flex: 1;
   min-width: 0;
@@ -149,54 +172,38 @@ h1 {
 /* --------------------------------------------------------------- buttons */
 
 .btn {
-  /**
-   * Centred by the box rather than by the text, for two reasons that were both
-   * live.
-   *
-   * A button's default centring is done by the anonymous line box inside it, so
-   * anything that changes the content box, a modifier adding vertical padding
-   * to a fixed height, pushes the label off centre instead of growing the
-   * button. `.btn--big` did exactly that: 14 pixels of padding inside a 32
-   * pixel height, and the label sat low.
-   *
-   * And letter-spacing is applied after every character including the last, so
-   * a centred tracked label carries one space of trailing air on its right and
-   * reads shifted left by half of it. The text-indent below is that same space
-   * put back on the front, which is the standard correction and the reason
-   * every tracked label in here now sits where it looks like it should.
-   */
+  /* Centred by the box rather than by the text, so a modifier that changes
+     padding grows the button instead of pushing the label off centre. Sentence
+     case in the reading face: a control should read like the words it says. */
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 7px;
   height: 32px;
-  min-width: 112px;
-  padding: 0 15px;
-  border: 1px solid var(--edge-2);
-  border-radius: 4px;
+  min-width: 0;
+  padding: 0 14px;
+  border: 1px solid var(--edge);
+  border-radius: 9px;
   background: var(--chalk);
-  font-family: var(--font-mono);
-  font-weight: 300;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-indent: 0.14em;
-  text-transform: uppercase;
-  /* The row of diagnostics buttons wraps as a row rather than inside a label:
-     a button reading "ISOLATION" over "TEST" looks like two controls. */
+  font-family: var(--font-sans);
+  font-weight: 550;
+  font-size: 12.5px;
+  letter-spacing: -0.005em;
   white-space: nowrap;
   color: var(--fg-2);
   transition:
-    border-color 0.24s var(--ease),
-    color 0.24s var(--ease),
-    background 0.24s var(--ease),
-    transform 0.1s var(--ease);
+    border-color 0.22s var(--ease),
+    color 0.22s var(--ease),
+    background 0.22s var(--ease),
+    transform 0.12s var(--ease);
 }
 .btn:hover:not(:disabled) {
-  border-color: var(--signal);
+  border-color: color-mix(in srgb, var(--signal) 60%, transparent);
   color: var(--signal);
-  background: rgba(220, 234, 79, 0.08);
+  background: rgba(220, 234, 79, 0.07);
 }
 .btn:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: translateY(1px) scale(0.985);
 }
 .btn:disabled {
   opacity: 0.34;
@@ -207,7 +214,8 @@ h1 {
   background: var(--signal);
   border-color: var(--signal);
   color: var(--void);
-  font-weight: 500;
+  font-weight: 650;
+  box-shadow: 0 8px 22px -12px rgba(220, 234, 79, 0.7);
 }
 .btn--primary:hover:not(:disabled) {
   background: #e7f36e;
@@ -220,19 +228,17 @@ h1 {
    Delete and Choose are the most-used controls in the whole surface. They keep
    a real fill and a real edge, and only give up size and weight. */
 .btn--quiet {
-  min-width: 0;
-  height: 27px;
+  height: 28px;
   padding: 0 11px;
-  font-size: 10.5px;
-  letter-spacing: 0.12em;
-  border-color: var(--edge);
+  font-size: 12px;
+  border-color: var(--hair-2);
   color: var(--fg-3);
   background: var(--chalk);
 }
 .btn--quiet:hover:not(:disabled) {
-  border-color: var(--signal);
+  border-color: color-mix(in srgb, var(--signal) 60%, transparent);
   color: var(--signal);
-  background: rgba(220, 234, 79, 0.08);
+  background: rgba(220, 234, 79, 0.07);
 }
 
 /* Destructive, so it warms to the alarm colour rather than to signal. Signal
@@ -356,8 +362,7 @@ h1 {
 .sub {
   font-family: var(--font-mono);
   font-weight: 300;
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: 10.5px;
   color: var(--mute-5);
   margin-top: 4px;
   overflow: hidden;
@@ -397,12 +402,10 @@ h1 {
 .count {
   font-family: var(--font-mono);
   font-weight: 300;
-  font-size: 11px;
-  letter-spacing: 0.07em;
-  color: var(--fg-3);
+  font-size: 10.5px;
+  color: var(--fg-4);
   background: var(--chalk);
-  border: 1px solid var(--edge);
-  border-radius: 3px;
+  border-radius: 6px;
   padding: 3px 7px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -425,7 +428,7 @@ select {
   color: var(--fg-2);
   font-family: var(--font-mono);
   font-size: 10px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.01em;
   cursor: pointer;
   transition: border-color 0.24s var(--ease);
 }
@@ -440,8 +443,7 @@ option {
 .check-mark {
   font-family: var(--font-mono);
   font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   white-space: nowrap;
   color: var(--fg-4);
 }
@@ -470,13 +472,14 @@ option {
 }
 
 .empty {
-  padding: 30px var(--gut);
+  padding: 22px var(--gut);
   margin: 0;
-  font-family: var(--font-mono);
-  font-weight: 300;
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  color: var(--mute-7);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--mute);
+  max-width: 46ch;
+  text-wrap: pretty;
 }
 
 .banner {
@@ -518,17 +521,22 @@ option {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding: 26px;
-  background: var(--lift);
-  border: 1px solid var(--edge);
-  animation: pop 0.32s var(--ease) both;
-  box-shadow: 0 50px 100px -40px rgba(0, 0, 0, 0.9);
+  padding: 24px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, var(--lift-2), var(--lift));
+  box-shadow:
+    inset 0 0 0 1px var(--hair-2),
+    inset 0 1px 0 rgba(239, 240, 234, 0.06),
+    0 40px 90px -30px rgba(3, 4, 5, 0.95);
+  animation: pop 0.36s var(--ease) both;
 }
 .sheet-body h3 {
   font-family: var(--font-display);
-  font-weight: 500;
+  font-weight: 600;
+  font-stretch: 112%;
   font-size: 24px;
-  letter-spacing: -0.01em;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
   margin: 0;
 }
 
@@ -538,24 +546,25 @@ option {
   gap: 7px;
 }
 .field input {
-  height: 36px;
-  padding: 0 11px;
-  border: 1px solid var(--edge-2);
-  border-radius: 4px;
-  background: var(--chrome);
+  height: 40px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--panel-4);
+  box-shadow: inset 0 0 0 1px var(--edge);
   color: var(--fg);
   font-size: 14px;
-  transition: border-color 0.24s var(--ease);
+  transition: box-shadow 0.2s var(--ease);
 }
 .field input:hover {
-  border-color: var(--edge-3);
+  box-shadow: inset 0 0 0 1px var(--edge-2);
 }
 /* The border going to signal is the focus indicator. The global outline on top
    of it draws a second ring three pixels out and the field reads as an error
    state rather than an active one. */
 .field input:focus,
 .field input:focus-visible {
-  border-color: var(--signal);
+  box-shadow: inset 0 0 0 1px var(--signal), 0 0 0 4px rgba(220, 234, 79, 0.12);
   outline: none;
 }
 
@@ -565,25 +574,22 @@ option {
   gap: 8px;
 }
 .swatch {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  /* The ring sits outside the swatch rather than inside it, so picking one
-     does not appear to shrink it. */
-  box-shadow: 0 0 0 1px var(--edge);
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  border: 0;
+  box-shadow: inset 0 0 0 1px rgba(3, 4, 5, 0.3);
   transition:
     transform 0.18s var(--ease),
     box-shadow 0.18s var(--ease);
 }
 .swatch:hover {
-  transform: scale(1.12);
+  transform: translateY(-2px);
 }
 .swatch[aria-checked='true'] {
-  transform: scale(1.08);
   box-shadow:
-    0 0 0 2px var(--void),
-    0 0 0 4px var(--fg);
+    0 0 0 2px var(--lift-2),
+    0 0 0 4px var(--fg-2);
 }
 
 /* Three mutually exclusive levels, all three visible at once. A dropdown would
@@ -597,21 +603,21 @@ option {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
-  border: 1px solid var(--edge-2);
-  border-radius: 4px;
-  overflow: hidden;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--panel-4);
+  box-shadow: inset 0 0 0 1px var(--hair-2);
 }
 .seg button {
-  padding: 9px 6px;
-  background: var(--chalk);
+  padding: 7px 6px;
+  border-radius: 8px;
+  background: transparent;
   border: none;
-  border-right: 1px solid var(--edge);
   color: var(--fg-4);
-  font-family: var(--font-mono);
-  font-weight: 300;
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-family: var(--font-sans);
+  font-weight: 550;
+  font-size: 12px;
   cursor: pointer;
   transition:
     color 0.2s var(--ease),
@@ -625,8 +631,9 @@ option {
   background: var(--chalk-2);
 }
 .seg button[aria-checked='true'] {
-  color: var(--void);
-  background: var(--signal);
+  color: var(--fg);
+  background: var(--lift-3);
+  box-shadow: inset 0 0 0 1px var(--hair-2), 0 4px 12px -6px rgba(3, 4, 5, 0.9);
 }
 /* Production is the level that refuses requests, so it is the one level that
    does not read as an ordinary selection. */
@@ -642,11 +649,8 @@ option {
 }
 .seg-note {
   margin: 0;
-  font-family: var(--font-mono);
-  font-weight: 300;
-  font-size: 10px;
-  line-height: 1.6;
-  letter-spacing: 0.05em;
+  font-size: 12px;
+  line-height: 1.55;
   color: var(--mute-5);
   min-height: 2.4em;
 }
@@ -675,8 +679,6 @@ option {
   font-family: var(--font-mono);
   font-weight: 300;
   font-size: 10.5px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
   white-space: nowrap;
   color: var(--mute-5);
 }
@@ -701,8 +703,7 @@ option {
 .who {
   font-family: var(--font-mono);
   font-weight: 300;
-  font-size: 10px;
-  letter-spacing: 0.06em;
+  font-size: 10.5px;
   color: var(--signal-mid);
   margin-top: 4px;
   overflow: hidden;
@@ -721,16 +722,14 @@ option {
 }
 
 .tag {
-  font-family: var(--font-mono);
-  font-weight: 300;
-  font-size: 10px;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
+  font-family: var(--font-sans);
+  font-weight: 550;
+  font-size: 11px;
   color: var(--fg-4);
   background: var(--chalk);
-  border: 1px solid var(--edge);
-  border-radius: 3px;
-  padding: 3px 7px;
+  border: 1px solid var(--hair-2);
+  border-radius: 6px;
+  padding: 2px 7px;
   white-space: nowrap;
 }
 .tag--signed {
@@ -848,43 +847,39 @@ option {
 }
 .toggle-label small {
   display: block;
-  font-family: var(--font-mono);
-  font-weight: 300;
-  font-size: 10px;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--mute-5);
-  margin-top: 5px;
+  margin-top: 3px;
 }
 
 .switch {
   width: 34px;
-  height: 18px;
+  height: 20px;
   flex: none;
   border-radius: 999px;
-  border: 1px solid var(--edge-2);
-  background: var(--chalk);
+  border: 0;
+  background: var(--chalk-2);
+  box-shadow: inset 0 0 0 1px var(--edge);
   display: flex;
   align-items: center;
-  padding: 0 2px;
-  transition:
-    background 0.24s var(--ease),
-    border-color 0.24s var(--ease);
+  padding: 0 3px;
+  transition: background 0.24s var(--ease);
 }
 .switch .knob {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: var(--fg-4);
+  background: var(--fg-3);
   transition:
-    transform 0.24s var(--ease),
+    transform 0.26s var(--ease),
     background 0.24s var(--ease);
 }
 .switch[aria-checked='true'] {
-  background: var(--signal);
-  border-color: var(--signal);
+  background: rgba(220, 234, 79, 0.28);
 }
 .switch[aria-checked='true'] .knob {
-  background: var(--void);
+  background: var(--signal);
   transform: translateX(14px);
 }
 .switch:disabled {
@@ -892,7 +887,7 @@ option {
   cursor: not-allowed;
 }
 .switch:hover:not(:disabled):not([aria-checked='true']) {
-  border-color: var(--edge-3);
+  box-shadow: inset 0 0 0 1px var(--edge-3);
 }
 
 /* --------------------------------------------------------------- adopt */
@@ -1053,7 +1048,7 @@ option {
   font-family: var(--font-mono);
   font-weight: 300;
   font-size: 10px;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.01em;
   color: var(--fg-4);
   font-variant-numeric: tabular-nums;
 }

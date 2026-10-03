@@ -70,7 +70,7 @@ function paintList() {
       el(
         'p',
         'empty',
-        scanned === null ? 'READING THE PROFILE JAR' : 'NOTHING SIGNED IN THAT WE CAN SEE'
+        scanned === null ? 'Reading this profile' : 'Nothing signed in that NVX can see. Open a site and sign in, and NVX will ask which session it is for.'
       )
     );
     return;
@@ -278,7 +278,7 @@ function paintDone(results) {
     box.append(row);
   }
 
-  if (!results.length) box.append(el('p', 'empty', 'NOTHING WAS SET UP'));
+  if (!results.length) box.append(el('p', 'empty', 'Nothing was set up.'));
 
   const summary = el('p', 'note');
   summary.textContent = made.length
@@ -340,5 +340,8 @@ $('open-guide')?.addEventListener('click', () => {
 $('close')?.addEventListener('click', () => {
   window.close();
 });
+
+// The mark turns beside the headline while the profile is read.
+if (typeof mountMark === 'function') mountMark($('wel-mark'), { state: 'idle' });
 
 void scan();

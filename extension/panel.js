@@ -180,7 +180,9 @@ function paintSessions() {
   disarm();
   node.replaceChildren();
   if (!state.sessions.length) {
-    node.append(el('p', 'empty', 'NO SESSIONS YET'));
+    node.append(
+      el('p', 'empty', 'No sessions yet. Open any site in a new tab and NVX asks which session it is for, or press New session.')
+    );
     return;
   }
   state.sessions.forEach((s, i) => {
@@ -198,8 +200,8 @@ function paintSessions() {
     // setting that changes whether a request goes out at all.
     const line = el('div', 'tags');
     line.append(el('span', 'sub', s.pinned.length ? s.pinned.join(', ') : 'no pinned domains'));
-    if (s.danger === 'block') line.append(el('span', 'tag tag--production', 'PRODUCTION'));
-    else if (s.danger === 'off') line.append(el('span', 'tag', 'UNGUARDED'));
+    if (s.danger === 'block') line.append(el('span', 'tag tag--production', 'Production'));
+    else if (s.danger === 'off') line.append(el('span', 'tag', 'Unguarded'));
     mid.append(line);
 
     // Domains this session was observed signing in at, as opposed to the ones
@@ -220,7 +222,7 @@ function paintSessions() {
     // The anonymous holding session is machinery the chooser needs. Offering a
     // delete button for it would let the user break their own account picker.
     if (s.system) {
-      row.append(dot, mid, count, el('span', 'tag tag--system', 'SYSTEM'));
+      row.append(dot, mid, count, el('span', 'tag tag--system', 'System'));
     } else {
       const actions = el('div', 'row-actions');
 
@@ -272,7 +274,7 @@ function paintTabs() {
   node.replaceChildren();
   const relevant = tabs.filter((t) => t.url && /^https?:/.test(t.url));
   if (!relevant.length) {
-    node.append(el('p', 'empty', 'NO HTTP TABS OPEN'));
+    node.append(el('p', 'empty', 'No sites open. Tabs on a website show up here, ready to move between sessions.'));
     paintMoveBar();
     return;
   }
@@ -321,7 +323,7 @@ function paintTabs() {
 
     const select = document.createElement('select');
     select.setAttribute('aria-label', `Session for ${t.title || t.url}`);
-    select.append(new Option('unbound', ''));
+    select.append(new Option('No session', ''));
     for (const s of state.sessions) {
       select.append(new Option(s.label, s.id));
     }
@@ -552,7 +554,7 @@ function paintChannels() {
       el(
         'small',
         null,
-        'Off by default. Sends which features ran, rough session and tab counts, days since install, error types, and your OS, browser and version, language and time-zone offset. Tied to a random id, never a URL, a site, a cookie or an account. Turning it off erases that id.'
+        'Off by default. Sends which features ran, rough daily counts and timings, session and tab counts, days since install, error types, which major sign-in provider had trouble (from a fixed list), and your OS, browser and version, language and time-zone offset. Tied to a random id, never a URL, any other site, a cookie or an account. Turning it off erases that id.'
       )
     );
     row.append(toggle, label);
@@ -628,8 +630,8 @@ function paintPause() {
   btn.classList.toggle('btn--alarm', paused);
 
   $('pause-note').textContent = paused
-    ? 'Paused. No rules, no cookie rewriting, no picker: every tab is behaving exactly as it would with this extension removed. Your sessions and everything in them are untouched and come straight back.'
-    : 'Turns everything off without losing anything. Every tab goes back to the browser’s own cookies, your sessions stay exactly where they are, and pressing it again puts them back. This is the first thing to try if a site has started behaving strangely, rather than uninstalling to find out.';
+    ? 'Paused. Every tab behaves as if NVX were not installed. Your sessions are untouched and come back when you resume.'
+    : 'Turns isolation off without losing anything. Try this first if a site acts strangely.';
 
   btn.onclick = () =>
     busy(btn, paused ? 'Resuming' : 'Pausing', async () => {
@@ -656,8 +658,8 @@ function paintReleased() {
   node.replaceChildren();
 
   $('released-note').textContent = released.length
-    ? 'These are handled by the browser exactly as they would be without NVX. A site lands here when you release it, or when a sign-in on it kept looping and NVX let go rather than keep fighting it.'
-    : 'Nothing is being skipped. If a sign-in ever loops, the site responsible lands here and this says so.';
+    ? 'NVX leaves these sites to the browser. A site lands here when you release it, or when its sign-in kept looping.'
+    : 'Every site is managed. If a sign-in ever loops, NVX releases that site and lists it here.';
 
   if (!released.length) {
     node.hidden = true;
@@ -669,7 +671,7 @@ function paintReleased() {
     const row = el('div', 'row row--released');
     const body = el('div');
     body.append(el('div', 'name name--sm', domain));
-    body.append(el('div', 'sub', 'not managed'));
+    body.append(el('div', 'sub', 'Not managed'));
 
     const back = el('button', 'btn btn--quiet', 'Manage again');
     back.type = 'button';
@@ -923,7 +925,9 @@ async function paintAudit() {
   const rows = report?.recent ?? [];
 
   if (!rows.length) {
-    node.append(el('p', 'empty', 'NOTHING WITH A BLAST RADIUS YET'));
+    node.append(
+      el('p', 'empty', 'Nothing guarded yet. Mark a session as production and NVX logs or blocks risky requests from it here.')
+    );
   }
 
   for (const e of rows.slice(0, 25)) {
@@ -1364,7 +1368,6 @@ function paintSync() {
 function paintPro() {
   const node = $('pro');
   const block = $('pro-block');
-  const badge = $('pro-badge');
   if (!node || !block) return;
   const lic = state.license ?? {};
   const tier = state.tier ?? 'free';
@@ -1372,65 +1375,114 @@ function paintPro() {
   block.hidden = false;
   node.replaceChildren();
 
-  const setBadge = (text, cls) => {
-    if (!badge) return;
-    badge.hidden = false;
-    badge.textContent = text;
-    badge.className = `pro-badge ${cls}`;
+  const open = (url) => {
+    void chrome.tabs.create({ url });
+    window.close();
   };
 
-  // A developer build unlocks everything without a licence, so it shows what a
-  // shipped build would gate rather than the free roadmap or a key form.
+  /**
+   * The plan card: one display word for where you stand, a badge, and the two
+   * or three facts that matter about it. Everything below it is what you can do.
+   */
+  const card = (opts) => {
+    const box = el('div', `plan-card plan-card--${opts.kind}`);
+    const top = el('div', 'plan-top');
+    top.append(el('span', 'plan-eyebrow', 'Your plan'));
+    const badge = el('span', `pro-badge ${opts.badgeClass}`, opts.badge);
+    top.append(badge);
+    box.append(top, el('div', 'plan-name', opts.name));
+    for (const line of opts.lines ?? []) {
+      if (line) box.append(el('p', 'plan-sub', line));
+    }
+    if (lic.deviceLabel) {
+      const dev = el('p', 'plan-device');
+      dev.append(el('span', 'plan-device-k', 'This device'), el('span', 'plan-device-v', lic.deviceLabel));
+      box.append(dev);
+    }
+    return box;
+  };
+
+  const links = (...pairs) => {
+    const row = el('div', 'plan-links');
+    for (const [label, url] of pairs) {
+      const a = el('button', 'plan-link', label);
+      a.type = 'button';
+      a.addEventListener('click', () => open(url));
+      row.append(a);
+    }
+    return row;
+  };
+
+  const section = (title) => {
+    const head = el('div', 'plan-section');
+    head.append(el('span', 'field-label', title));
+    return head;
+  };
+
+  const featureBlock = (title, set) => {
+    const wrap = el('div', 'plan-feats');
+    wrap.append(section(title), proFeatureList(set));
+    return wrap;
+  };
+
+  const BUY = ['Buy Pro', 'https://session.nvx.sh/pro'];
+  const RECOVER = ['Lost your key?', 'https://session.nvx.sh/recover'];
+  const DEVICES = ['Manage devices', 'https://session.nvx.sh/account'];
+
+  // A developer build unlocks everything without a licence. It still offers the
+  // key form when a licence server is configured, so the real flow can be tried.
   if (lic.dev === true) {
-    setBadge('Dev', 'pro-badge--tester');
     node.append(
-      el(
-        'p',
-        'pro-lead',
-        'Developer build. Every Pro feature is unlocked locally for testing; a shipped build gates these behind a licence.'
-      )
+      card({
+        kind: 'dev',
+        name: 'Developer',
+        badge: 'Dev',
+        badgeClass: 'pro-badge--tester',
+        lines: ['Every Pro feature is unlocked locally for testing. A shipped build gates these behind a licence.'],
+      })
     );
-    node.append(proFeatureList(unlocked));
+    node.append(section('Test a licence key'));
+    if (lic.possible === true) {
+      node.append(keyForm({ lic, links: null }));
+    } else {
+      node.append(el('p', 'pro-note', 'No licence server is configured in this build, so a key cannot be checked here.'));
+    }
+    node.append(featureBlock('Unlocked here', unlocked));
     return;
   }
 
-  // A free build (the store listing today): the roadmap, stated plainly, with no
-  // way to pay because there is nothing to pay for yet.
+  // A free build: the roadmap, stated plainly.
   if (lic.buildPro !== true) {
-    setBadge('Free', 'pro-badge--free');
     node.append(
-      el(
-        'p',
-        'pro-lead',
-        'Everything NVX does today is free and always will be. Pro is the next layer of isolation, in the works now.'
-      )
+      card({
+        kind: 'free',
+        name: 'Free',
+        badge: 'Free',
+        badgeClass: 'pro-badge--free',
+        lines: ['Everything NVX does today is free and always will be. Pro is the next layer of isolation.'],
+      })
     );
-    node.append(proFeatureList(new Set()));
-    const learn = el('button', 'btn btn--quiet', 'Read the plan');
-    learn.type = 'button';
-    learn.addEventListener('click', () =>
-      chrome.tabs.create({ url: 'https://session.nvx.sh/pro' })
-    );
-    const acts = el('div', 'pro-acts');
-    acts.append(learn);
-    node.append(acts);
+    node.append(links(['Read the plan', 'https://session.nvx.sh/pro']));
+    node.append(featureBlock('What Pro adds', new Set()));
     return;
   }
 
   // A Pro build with a licence that is actually unlocking features.
   if (lic.present && tier !== 'free' && unlocked.size) {
     const tester = tier === 'max_access';
-    setBadge(tester ? 'Tester' : 'Pro', tester ? 'pro-badge--tester' : 'pro-badge--pro');
-    node.append(
-      el('p', 'pro-lead', tester ? 'Max access, unlocked on this device.' : 'Pro is active on this device.')
-    );
     const through = fmtDay(lic.exp);
-    if (through) {
-      node.append(
-        el('p', 'pro-note', `Works offline through ${through}, and re-checks with the server on its own.`)
-      );
-    }
-    node.append(proFeatureList(unlocked));
+    node.append(
+      card({
+        kind: tester ? 'tester' : 'pro',
+        name: tester ? 'Max access' : 'Pro',
+        badge: tester ? 'Tester' : 'Active',
+        badgeClass: tester ? 'pro-badge--tester' : 'pro-badge--pro',
+        lines: [
+          tester ? 'Every feature, unlocked on this device for testing.' : 'Active on this device.',
+          through ? `Works offline through ${through}, and re-checks with the server on its own.` : null,
+        ],
+      })
+    );
 
     const acts = el('div', 'pro-acts');
     const check = el('button', 'btn btn--quiet', 'Check status');
@@ -1441,135 +1493,63 @@ function paintPro() {
         await refresh();
       })
     );
+    // Armed before it acts: removing frees the seat, and getting it back means
+    // finding the key again.
     const remove = el('button', 'btn btn--quiet btn--danger', 'Remove from this device');
     remove.type = 'button';
-    remove.addEventListener('click', () =>
-      busy(remove, 'Removing', async () => {
+    let armed = false;
+    remove.addEventListener('click', () => {
+      if (!armed) {
+        armed = true;
+        remove.textContent = 'Remove Pro here?';
+        remove.classList.add('is-armed');
+        setTimeout(() => {
+          if (!armed) return;
+          armed = false;
+          remove.textContent = 'Remove from this device';
+          remove.classList.remove('is-armed');
+        }, 6000);
+        return;
+      }
+      armed = false;
+      void busy(remove, 'Removing', async () => {
         await send({ cmd: 'removeLicense' });
         await refresh();
         toast('Pro removed from this device. The seat is free to use on another.');
-      })
-    );
+      });
+    });
     acts.append(check, remove);
-    node.append(acts);
+    node.append(acts, links(DEVICES));
+    node.append(featureBlock('Unlocked', unlocked));
     return;
   }
 
   // A Pro build with no working licence: the entry form. Also the state a
-  // present-but-not-unlocking token lands in (expired, or bound to another
-  // device), with a line saying so.
-  setBadge('Free', 'pro-badge--free');
-  // The key is still stored, but the server said it is not unlocking right now.
-  // Say why, and that it comes back on its own, rather than showing a blank form.
+  // present-but-not-unlocking token lands in (expired, paused, or bound to
+  // another device), with a line saying why and that it comes back on its own.
   const lapseNotes = {
     paused: 'This licence is paused. Pro comes back on its own once it is resumed; there is no need to enter the key again.',
     expired: 'This licence has lapsed. When the renewal goes through, Pro comes back on its own. Check status to pick it up now.',
     not_found: 'The licence server does not recognise this key. If you were charged for it, contact support with your receipt and this key.',
   };
-  if (lic.present && lapseNotes[lic.lapse]) {
-    node.append(el('p', 'pro-note pro-note--warn', lapseNotes[lic.lapse]));
-  } else if (lic.present && (lic.reason === 'expired' || lic.reason === 'wrong_device')) {
-    node.append(
-      el(
-        'p',
-        'pro-note pro-note--warn',
-        lic.reason === 'expired'
-          ? 'This licence has expired. Enter a current key, or check status if it was renewed.'
-          : 'This licence is active on another device. Enter its key here to move it to this one.'
-      )
-    );
-  } else {
-    node.append(
-      el('p', 'pro-lead', 'Have a Pro or tester key? Enter it to unlock Pro on this device.')
-    );
-  }
+  let why = null;
+  if (lic.present && lapseNotes[lic.lapse]) why = lapseNotes[lic.lapse];
+  else if (lic.present && lic.reason === 'expired') why = 'This licence has expired. Enter a current key, or check status if it was renewed.';
+  else if (lic.present && lic.reason === 'wrong_device') why = 'This licence is active on another device. Enter its key here to move it to this one.';
 
-  const form = el('div', 'pro-form');
-  const input = el('input', 'pro-input');
-  input.type = 'text';
-  input.placeholder = 'NVX-XXXX-XXXX-XXXX';
-  input.spellcheck = false;
-  input.autocomplete = 'off';
-  const activate = el('button', 'btn', 'Activate');
-  activate.type = 'button';
+  node.append(
+    card({
+      kind: 'free',
+      name: 'Free',
+      badge: lic.present ? 'Not active' : 'Free',
+      badgeClass: 'pro-badge--free',
+      lines: [lic.present ? null : 'Have a Pro or tester key? Enter it to unlock Pro on this device.'],
+    })
+  );
+  if (why) node.append(el('p', 'pro-note pro-note--warn plan-why', why));
+  node.append(section('Licence key'));
+  node.append(keyForm({ lic, links: links(BUY, RECOVER, DEVICES) }));
 
-  const msg = el('p', 'pro-msg');
-  msg.hidden = true;
-  const say = (text, cls) => {
-    msg.hidden = false;
-    msg.textContent = text;
-    msg.className = `pro-msg ${cls ?? ''}`;
-  };
-
-  const submit = (transfer) =>
-    busy(activate, 'Activating', async () => {
-      const key = input.value.trim();
-      if (!key) {
-        say('Enter your licence key first.', 'pro-msg--warn');
-        return;
-      }
-      const r = await send({ cmd: 'enterLicense', key, ...(transfer ? { transfer: true } : {}) });
-      const result = r?.result ?? {};
-      if (result.ok) {
-        await refresh();
-        toast('Pro unlocked on this device.');
-        return;
-      }
-      if (result.reason === 'seat_taken') {
-        renderSeatTaken(result, key);
-        return;
-      }
-      const reasons = {
-        not_found: 'That key was not recognised. Check it and try again.',
-        revoked: 'This licence has been revoked.',
-        paused: 'This licence is paused. It will work again once it is resumed.',
-        expired: 'This licence has expired.',
-        network: 'Could not reach the licence server. Check your connection and try again.',
-        rejected: 'That key could not be activated.',
-      };
-      say(reasons[result.reason] ?? 'That key could not be activated.', 'pro-msg--warn');
-    });
-
-  // The seat-taken transfer: the same key is live on another device, so offer to
-  // move it here. This is the whole one-device-that-follows-you flow, and it
-  // works even if that other machine is lost, because the release is server-side.
-  function renderSeatTaken(result, key) {
-    const box = el('div', 'pro-transfer');
-    box.append(
-      el(
-        'p',
-        'pro-note',
-        `Your Pro is active on ${plural(result.devices?.length || 1, 'another device', 'your other devices')}. Moving it here signs it out there.`
-      )
-    );
-    for (const d of result.devices ?? []) {
-      const row = el('div', 'pro-device');
-      row.append(el('span', 'pro-device-name', d.label || 'a device'));
-      const seen = fmtDay(d.lastSeen ? Math.floor(d.lastSeen / 1000) : 0);
-      if (seen) row.append(el('span', 'pro-device-seen', `last seen ${seen}`));
-      box.append(row);
-    }
-    const move = el('button', 'btn', 'Move Pro to this device');
-    move.type = 'button';
-    move.addEventListener('click', () => submit(true));
-    box.append(move);
-    node.replaceChildren();
-    node.append(
-      el('p', 'pro-lead', 'Move your licence to this device'),
-      box
-    );
-  }
-
-  activate.addEventListener('click', () => submit(false));
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submit(false);
-  });
-  form.append(input, activate);
-  node.append(form, msg);
-
-  // A key is stored but not unlocking (paused, expired, or renewed on the
-  // server). Offer a status check so a resumed or renewed licence comes back
-  // without re-typing the key.
   if (lic.present) {
     const check = el('button', 'btn btn--quiet', 'Check status');
     check.type = 'button';
@@ -1584,7 +1564,163 @@ function paintPro() {
     node.append(acts);
   }
 
-  node.append(proFeatureList(new Set()));
+  node.append(featureBlock('What Pro adds', new Set()));
+
+  /**
+   * ------------------------------------------------------------------
+   *  Purpose  |  The key field, its button, its message line, and the
+   *           |  seat-taken transfer that replaces it when needed.
+   *  How      |  Formats as you type (uppercase, NVX- prefix, groups
+   *           |  of four) only while the caret is at the end, so
+   *           |  fixing one character in the middle is not fought.
+   *           |  A paste is formatted whole.
+   * ------------------------------------------------------------------
+   */
+  function keyForm({ links: after }) {
+    const wrap = el('div', 'plan-key');
+    const form = el('div', 'pro-form');
+    const input = el('input', 'pro-input');
+    input.type = 'text';
+    input.placeholder = 'NVX-XXXX-XXXX-XXXX';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', 'Licence key');
+    input.setAttribute('autocapitalize', 'characters');
+    const activate = el('button', 'btn btn--primary', 'Activate');
+    activate.type = 'button';
+
+    const msg = el('p', 'pro-msg');
+    msg.hidden = true;
+    const say = (text, cls) => {
+      msg.hidden = false;
+      msg.textContent = text;
+      msg.className = `pro-msg ${cls ?? ''}`;
+    };
+
+    input.addEventListener('input', (e) => {
+      const atEnd = input.selectionStart === input.value.length;
+      if (!atEnd && e.inputType !== 'insertFromPaste') return;
+      const next = formatKey(input.value);
+      if (next !== input.value) {
+        input.value = next;
+        input.setSelectionRange(next.length, next.length);
+      }
+    });
+
+    const submit = (transfer) =>
+      busy(activate, 'Activating', async () => {
+        const key = formatKey(input.value).replace(/-$/, '');
+        if (!key) {
+          say('Enter your licence key first.', 'pro-msg--warn');
+          input.focus();
+          return;
+        }
+        const r = await send({ cmd: 'enterLicense', key, ...(transfer ? { transfer: true } : {}) });
+        const result = r?.result ?? {};
+        if (result.ok) {
+          await refresh();
+          toast('Pro unlocked on this device.');
+          return;
+        }
+        if (result.reason === 'seat_taken') {
+          renderSeatTaken(result, key);
+          return;
+        }
+        const reasons = {
+          not_found: 'That key was not recognised. Check it and try again.',
+          revoked: 'This licence has been revoked.',
+          paused: 'This licence is paused. It will work again once it is resumed.',
+          expired: 'This licence has expired.',
+          network: 'Could not reach the licence server. Check your connection and try again.',
+          rejected: 'That key could not be activated.',
+          transfer_limit: "This licence has moved devices too often this month. Contact support and we'll move it for you.",
+          rate: 'Too many attempts. Wait a minute and try again.',
+        };
+        say(reasons[result.reason] ?? 'That key could not be activated.', 'pro-msg--warn');
+      });
+
+    // The seat-taken transfer: the same key is live on another device, so offer
+    // to move it here. Works even if that machine is lost, because the release
+    // is server-side.
+    function renderSeatTaken(result, key) {
+      const box = el('div', 'pro-transfer');
+      box.append(el('p', 'pro-lead', 'Move your licence to this device'));
+      box.append(
+        el(
+          'p',
+          'pro-note',
+          `Your Pro is active on ${plural(result.devices?.length || 1, 'another device', 'other devices')}. Moving it here signs it out there. Browsers on the same computer count as one device.`
+        )
+      );
+      for (const d of result.devices ?? []) {
+        const row = el('div', 'pro-device');
+        row.append(el('span', 'pro-device-name', d.label || 'A device'));
+        const seen = fmtDay(d.lastSeen ? Math.floor(d.lastSeen / 1000) : 0);
+        if (seen) row.append(el('span', 'pro-device-seen', `last seen ${seen}`));
+        box.append(row);
+      }
+      const acts = el('div', 'pro-acts');
+      const move = el('button', 'btn btn--primary', 'Move Pro to this device');
+      move.type = 'button';
+      const cancel = el('button', 'btn btn--quiet', 'Not now');
+      cancel.type = 'button';
+      cancel.addEventListener('click', () => paintPro());
+      const tmsg = el('p', 'pro-msg');
+      tmsg.hidden = true;
+      move.addEventListener('click', () =>
+        busy(move, 'Moving', async () => {
+          const r = await send({ cmd: 'enterLicense', key, transfer: true });
+          const res = r?.result ?? {};
+          if (res.ok) {
+            await refresh();
+            toast('Pro moved to this device.');
+            return;
+          }
+          const why2 = {
+            transfer_limit: "This licence has moved devices too often this month. Contact support and we'll move it for you.",
+            rate: 'Too many attempts. Wait a minute and try again.',
+            network: 'Could not reach the licence server. Check your connection and try again.',
+          };
+          tmsg.hidden = false;
+          tmsg.className = 'pro-msg pro-msg--warn';
+          tmsg.textContent = why2[res.reason] ?? 'The licence could not be moved.';
+        })
+      );
+      acts.append(move, cancel);
+      box.append(acts, tmsg);
+      wrap.replaceChildren(box);
+    }
+
+    activate.addEventListener('click', () => submit(false));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submit(false);
+    });
+    form.append(input, activate);
+    wrap.append(form, msg);
+    if (after) wrap.append(after);
+    return wrap;
+  }
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  A licence key the way it is printed, from however it
+ *           |  was typed or pasted.
+ *  How      |  Uppercase, everything but letters and digits dropped,
+ *           |  a leading NVX dropped, then NVX- and groups of four.
+ *           |  A body longer than twelve is not a store key (a
+ *           |  tester key, say), so it is only uppercased and
+ *           |  trimmed, never reshaped. The server normalises again.
+ * ------------------------------------------------------------------
+ */
+function formatKey(raw) {
+  const upper = String(raw ?? '').toUpperCase().trim();
+  let body = upper.replace(/[^A-Z0-9]/g, '');
+  if (body.startsWith('NVX')) body = body.slice(3);
+  if (!body) return upper.startsWith('N') ? upper.replace(/[^A-Z-]/g, '') : '';
+  if (body.length > 12) return upper.replace(/\s+/g, '');
+  const groups = body.match(/.{1,4}/g) ?? [];
+  return `NVX-${groups.join('-')}`;
 }
 
 /**
@@ -1605,9 +1741,10 @@ function paintThirdParties() {
   const total = real.reduce((n, s) => n + (s.thirdParties?.length ?? 0), 0);
 
   if (!total) {
-    node.append(el('p', 'empty', 'NOTHING THIRD PARTY SEEN YET'));
-    $('tp-note').textContent =
-      'Populated as your sessions browse. A session with no third parties has either seen none or has not been used yet.';
+    node.append(
+      el('p', 'empty', 'No third parties seen yet. This fills in as your sessions browse.')
+    );
+    $('tp-note').textContent = '';
     return;
   }
 
@@ -1639,7 +1776,7 @@ function paintThirdParties() {
 
     // A single switch over the whole session, labelled by the state it is in
     // rather than by a bare adjective, so it reads as a mode and not as a verb.
-    const toggle = el('button', `btn btn--quiet ${blocking ? 'btn--on' : ''}`, blocking ? 'BLOCKING' : 'ALLOWING ALL');
+    const toggle = el('button', `btn btn--quiet ${blocking ? 'btn--on' : ''}`, blocking ? 'Blocking' : 'Allowing all');
     toggle.type = 'button';
     toggle.title = blocking
       ? 'This whole session blocks third parties: one it has no cookies for gets nothing. Click to allow every third party instead.'
@@ -1702,7 +1839,7 @@ function paintThirdParties() {
       const pick = el(
         'button',
         `tag tag--act ${allowed ? 'tag--allowed' : sighting.blocked ? 'tag--blocked' : 'tag--production'}`,
-        state.toUpperCase()
+        state
       );
       pick.type = 'button';
       // Only means anything while the session is blocking. Said rather than
@@ -1844,6 +1981,59 @@ function paintNewDanger() {
  */
 const newTabs = new Set();
 
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  The sites a session could pin, offered as chips, so
+ *           |  nobody has to know a domain by heart.
+ *  How      |  Known sites (pinned, then learned) first, then the
+ *           |  sites of open tabs. A chip toggles its domain in the
+ *           |  comma list in the text field, which stays the one
+ *           |  source of truth that create and save already read.
+ *           |  single: a chip replaces the field instead (sign in).
+ * ------------------------------------------------------------------
+ */
+function siteChips(node, input, session, { single = false } = {}) {
+  if (!node || !input) return;
+  const known = session ? [...(session.pinned ?? []), ...(session.family ?? [])] : [];
+  const open = tabs
+    .filter((t) => t.url && /^https?:/.test(t.url))
+    .map((t) => domainOfUrl(t.url))
+    .filter(Boolean);
+  const sites = [...new Set([...known, ...open])].slice(0, 14);
+  const listed = () =>
+    input.value
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+  const paint = () => {
+    node.replaceChildren();
+    node.hidden = !sites.length;
+    const have = new Set(listed());
+    for (const site of sites) {
+      const chip = el('button', 'site-chip');
+      chip.type = 'button';
+      const on = have.has(site);
+      chip.setAttribute('aria-pressed', String(on));
+      if (known.includes(site)) chip.classList.add('site-chip--known');
+      chip.title = single ? `Sign in at ${site}` : on ? `Stop pinning ${site}` : `Pin ${site}`;
+      chip.append(el('span', null, site));
+      chip.addEventListener('click', () => {
+        if (single) {
+          input.value = site;
+        } else {
+          const now = listed();
+          input.value = (now.includes(site) ? now.filter((x) => x !== site) : [...now, site]).join(', ');
+        }
+        paint();
+      });
+      node.append(chip);
+    }
+  };
+  input.oninput = paint;
+  paint();
+}
+
 function paintNewTabs() {
   const node = $('new-tabs');
   if (!node) return;
@@ -1853,7 +2043,7 @@ function paintNewTabs() {
   for (const id of [...newTabs]) if (!relevant.some((t) => t.id === id)) newTabs.delete(id);
 
   if (!relevant.length) {
-    node.append(el('p', 'empty', 'NO OPEN TABS'));
+    node.append(el('p', 'empty empty--inline', 'No sites open in other tabs.'));
     return;
   }
 
@@ -1889,6 +2079,7 @@ $('new-session')?.addEventListener('click', () => {
   paintNewSwatches();
   paintNewDanger();
   paintNewTabs();
+  siteChips($('new-sites'), $('new-pinned'), null);
   showSheet('sheet', 'new-label', $('new-session'));
 });
 $('sheet-cancel')?.addEventListener('click', closeSheet);
@@ -1943,6 +2134,7 @@ function openSignIn(session, returnTo) {
   input.value = '';
   $('signin-for').textContent = session.label;
   $('signin-swatch').style.setProperty('--tone', hex(session.color));
+  siteChips($('signin-sites'), input, session, { single: true });
   showSheet('signin-sheet', 'signin-url', returnTo);
 }
 
@@ -1953,6 +2145,7 @@ $('signin-close')?.addEventListener('click', closeSheet);
 for (const chip of document.querySelectorAll('[data-signin-site]')) {
   chip.addEventListener('click', () => {
     $('signin-url').value = chip.dataset.signinSite;
+    $('signin-url').dispatchEvent(new Event('input'));
   });
 }
 
@@ -1996,7 +2189,7 @@ function paintEditTabs() {
   for (const id of [...editTabs]) if (!relevant.some((t) => t.id === id)) editTabs.delete(id);
 
   if (!relevant.length) {
-    node.append(el('p', 'empty', 'NO OTHER OPEN TABS'));
+    node.append(el('p', 'empty empty--inline', 'No other sites open.'));
     return;
   }
 
@@ -2047,6 +2240,7 @@ function openEdit(session, returnTo) {
   paintEditSwatches();
   paintEditDanger();
   paintEditTabs();
+  siteChips($('edit-sites'), $('edit-pinned'), session);
   showSheet('edit-sheet', 'edit-label', returnTo);
 }
 
@@ -2212,7 +2406,7 @@ function paintAdoptList() {
 
   if (!shown.length) {
     node.append(
-      el('p', 'empty', adoptCandidates.length ? 'NOTHING MATCHES THAT FILTER' : 'NOTHING TO ADOPT')
+      el('p', 'empty', adoptCandidates.length ? 'Nothing matches that filter.' : 'Nothing signed in that NVX can see.')
     );
     return;
   }
@@ -2239,8 +2433,8 @@ function paintAdoptList() {
     );
 
     const tags = el('div', 'tags');
-    if (c.signedIn) tags.append(el('span', 'tag tag--signed', 'SIGNED IN'));
-    if (c.open) tags.append(el('span', 'tag tag--open', 'OPEN'));
+    if (c.signedIn) tags.append(el('span', 'tag tag--signed', 'Signed in'));
+    if (c.open) tags.append(el('span', 'tag tag--open', 'Open'));
 
     const toggle = () => {
       if (adoptSelected.has(c.domain)) adoptSelected.delete(c.domain);

@@ -8,41 +8,65 @@
     <link rel="stylesheet" href="chooser.css" />
   </head>
   <body>
+    <div class="ambient" id="ambient" aria-hidden="true"></div>
     <main class="stage">
-      <div class="card" id="card">
-        <p class="eyebrow">NVX SESSION // HELD</p>
-        <h1 id="title">Which account?</h1>
-        <p class="sub">
-          <span id="host" class="host">this site</span> has more than one of your accounts.
-          Nothing has been requested yet.
-        </p>
+      <section class="ask" id="card" aria-labelledby="title">
+        <header class="ask-head">
+          <span class="ask-mark" id="mark"></span>
+          <p class="eyebrow" id="eyebrow">Before it loads</p>
+        </header>
 
-        <div class="list" id="list">
-          <p class="waiting" data-label>reading sessions</p>
-        </div>
+        <h1 class="title" id="title">
+          <span id="lead">Which session is</span>
+          <span class="host" id="host">this site</span><span id="tail"> for?</span>
+        </h1>
+        <p class="sub" id="sub">Nothing has been sent to the site yet. Pick where it signs in.</p>
 
-        <div class="alt">
-          <button class="line" id="fresh" type="button">
-            <span class="line-mark">+</span>
-            <span class="line-body">
-              <span class="line-name">New session</span>
-              <span class="line-note">Sign in as somebody else, kept apart from the rest</span>
+        <ol class="list" id="list" aria-label="Sessions">
+          <li class="waiting">Reading your sessions</li>
+        </ol>
+
+        <div class="more">
+          <form class="row row--new" id="new-form" autocomplete="off">
+            <button class="row-hit" id="new-open" type="button" aria-expanded="false">
+              <span class="glyph" aria-hidden="true">+</span>
+              <span class="row-body">
+                <span class="row-name">New session</span>
+                <span class="row-meta">A fresh, empty jar for another account</span>
+              </span>
+              <kbd>N</kbd>
+            </button>
+            <div class="editor" id="new-editor" hidden>
+              <input class="name-in" id="new-name" maxlength="40" aria-label="Session name" />
+              <div class="swatches" id="new-swatches" role="radiogroup" aria-label="Colour"></div>
+              <button class="go" type="submit">Create and open</button>
+            </div>
+          </form>
+
+          <button class="row row--plain" id="once" type="button">
+            <span class="row-hit">
+              <span class="glyph" aria-hidden="true">&#8599;</span>
+              <span class="row-body">
+                <span class="row-name">No session</span>
+                <span class="row-meta">Open it as a normal tab, outside NVX</span>
+              </span>
+              <kbd>Esc</kbd>
             </span>
           </button>
-          <button class="line" id="once" type="button">
-            <span class="line-mark">&#183;</span>
-            <span class="line-body">
-              <span class="line-name">Just this once</span>
-              <span class="line-note">Open it the way the browser normally would, unmanaged</span>
-            </span>
-          </button>
         </div>
 
-        <p class="foot">
+        <label class="remember" id="remember-row">
+          <input type="checkbox" id="remember" checked />
+          <span class="switch" aria-hidden="true"></span>
+          <span class="remember-text">Remember for <b id="remember-host">this site</b>, so new tabs open there without asking</span>
+        </label>
+
+        <footer class="foot">
           <span class="dest" id="dest"></span>
-        </p>
-      </div>
+        </footer>
+      </section>
     </main>
+    <script src="ui/mark.js"></script>
     <script src="chooser.js"></script>
   </body>
 </html>

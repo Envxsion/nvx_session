@@ -40,12 +40,12 @@ describe('every page loads what it references', () => {
       const { scripts, styles } = assets(read(`extension/${page}`));
       for (const ref of [...scripts, ...styles]) {
         // Two kinds of reference are not files in `extension/`. The shared token
-        // sheet is staged by the build out of `packages/ui`, and the manifest v2
+        // sheet, fonts and mark are staged by the build out of `packages/ui`, and the manifest v2
         // background page loads the compiled worker out of `src/`, which only
         // exists in `dist`.
         const path =
-          ref === 'ui/tokens.css'
-            ? 'packages/ui/tokens.css'
+          ref.startsWith('ui/')
+            ? `packages/${ref}`
             : ref.startsWith('src/')
               ? ref.replace(/\.js$/, '.ts')
               : `extension/${ref}`;
@@ -183,11 +183,13 @@ describe('the popup navigation', () => {
   });
 
   /**
-   * The nav is a fixed four column grid, so the destinations have to divide
-   * into rows evenly or the last row is ragged and reads as an accident.
+   * The bar is five icons across. A sixth would squeeze every label, and a
+   * view that wants a door of its own belongs under one of the five (Plan and
+   * Help sit under Settings, the records under Activity).
    */
-  it('fills its rows', () => {
-    expect(destinations.length % 4).toBe(0);
+  it('keeps the bar to five destinations', () => {
+    const bar = html.slice(html.indexOf('<nav class="nav"'), html.indexOf('</nav>', html.indexOf('<nav class="nav"')));
+    expect([...bar.matchAll(/class="nav-b"/g)].length).toBe(5);
   });
 });
 
@@ -221,6 +223,8 @@ describe('the guide covers what the product has', () => {
       settings: 'fingerprint',
       journal: 'journal',
       guide: 'idea',
+      plan: 'idea',
+      help: 'broken',
     };
     for (const d of destinations) {
       expect(covers[d], `no mapping declared for the ${d} view`).toBeTruthy();
@@ -546,8 +550,8 @@ describe('the default-account hint names no provider', () => {
 
   it('keys the hint on the detected identity and its domain, not a hardcoded site', () => {
     const fn = popup.slice(popup.indexOf('function paintHere('), popup.indexOf('function paintSwitch('));
-    expect(fn).toContain('session.identityDomain');
-    expect(fn).toContain('session.identity');
+    expect(fn).toContain('.identityDomain');
+    expect(fn).toMatch(/\.identity\b/);
     // No provider hostname is baked into the popup's hint logic.
     expect(fn).not.toMatch(/google\.com|microsoftonline|okta/i);
   });

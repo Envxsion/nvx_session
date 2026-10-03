@@ -99,12 +99,33 @@
   --s-magenta: #e56ec4;
   --s-chalk: #dfe4ec;
 
-  --font-display: 'Bodoni Moda', 'Didot', 'Playfair Display', Georgia, serif;
-  --font-sans: 'Familjen Grotesk', system-ui, 'Segoe UI', sans-serif;
-  --font-mono: 'Martian Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  /* Archivo is the face nvx.sh moved to, for reading and display both; its width
+     axis carries the headlines. Martian Mono is for labels and numbers. Both are
+     bundled (fonts/, OFL), because a token naming a face that never loads falls
+     back to whatever the system has, and that fallback was most of why the
+     popup looked unlike the site. */
+  --font-display: 'NVX Archivo', system-ui, 'Segoe UI', sans-serif;
+  --font-sans: 'NVX Archivo', system-ui, 'Segoe UI', sans-serif;
+  --font-mono: 'NVX Martian', ui-monospace, 'Cascadia Mono', Consolas, monospace;
 
   --ease: cubic-bezier(0.19, 1, 0.22, 1);
   --ease-shake: cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+@font-face {
+  font-family: 'NVX Archivo';
+  src: url('fonts/archivo.woff2') format('woff2');
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'NVX Martian';
+  src: url('fonts/martianmono.woff2') format('woff2');
+  font-weight: 100 800;
+  font-stretch: 75% 112.5%;
+  font-display: block;
 }
 
 *,
@@ -290,4 +311,83 @@ input::placeholder {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* --------------------------------------------------------------------------
+   The mark (packages/ui/mark.js)
+
+   Three rings turning at different speeds, like an aperture finding focus.
+   Transform-only animation, so it runs on the compositor and never janks the
+   panel. Each state changes speed and colour, never the geometry.
+   -------------------------------------------------------------------------- */
+
+svg.nvx-mark {
+  --mark-tone: var(--signal);
+  width: 28px;
+  height: 28px;
+  display: block;
+  overflow: visible;
+  color: var(--mark-tone);
+  transition: color 600ms var(--ease);
+}
+
+svg.nvx-mark .ring {
+  transform-origin: 17px 17px;
+  transform-box: view-box;
+}
+
+svg.nvx-mark path {
+  stroke: currentColor;
+  transition: stroke 600ms var(--ease);
+}
+
+svg.nvx-mark .core {
+  fill: currentColor;
+  opacity: 0;
+  transform-origin: 17px 17px;
+  transform-box: view-box;
+  transition: opacity 400ms var(--ease);
+}
+
+svg.nvx-mark .ring-1 { animation: nvx-spin 14s linear infinite; }
+svg.nvx-mark .ring-2 { animation: nvx-spin 9s linear infinite reverse; }
+svg.nvx-mark .ring-3 { animation: nvx-spin 6s linear infinite; }
+
+/* Live: a session holds this tab. Slower, steadier, in the session's colour,
+   with the core lit. */
+svg.nvx-mark[data-state='live'] .ring-1 { animation-duration: 28s; }
+svg.nvx-mark[data-state='live'] .ring-2 { animation-duration: 18s; }
+svg.nvx-mark[data-state='live'] .ring-3 { animation-duration: 12s; }
+svg.nvx-mark[data-state='live'] .core { opacity: 1; animation: nvx-beat 2.8s var(--ease) infinite; }
+
+/* Ask: the picker is waiting. The rings close in and quicken. */
+svg.nvx-mark[data-state='ask'] .ring-1 { animation: nvx-focus 2.4s var(--ease) infinite, nvx-spin 4s linear infinite; }
+svg.nvx-mark[data-state='ask'] .ring-2 { animation-duration: 3s; }
+svg.nvx-mark[data-state='ask'] .ring-3 { animation-duration: 2s; }
+
+/* Paused: stopped and grey. Nothing is being isolated, and it should look it. */
+svg.nvx-mark[data-state='paused'] { --mark-tone: var(--mute-7) !important; }
+svg.nvx-mark[data-state='paused'] .ring { animation-play-state: paused; }
+
+/* Alarm: something leaked or looped. */
+svg.nvx-mark[data-state='alarm'] { --mark-tone: var(--alarm) !important; }
+svg.nvx-mark[data-state='alarm'] .ring-1 { animation: nvx-shake 0.5s var(--ease-shake) 2, nvx-spin 6s linear infinite; }
+
+@keyframes nvx-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes nvx-focus {
+  0%, 100% { scale: 1; }
+  50% { scale: 0.86; }
+}
+
+@keyframes nvx-beat {
+  0%, 100% { transform: scale(1); }
+  40% { transform: scale(1.6); }
+}
+
+@keyframes nvx-shake {
+  20%, 60% { translate: -1px 0; }
+  40%, 80% { translate: 1px 0; }
 }
