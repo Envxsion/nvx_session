@@ -1159,10 +1159,25 @@
      * fingerprint in is a read of the surface, whatever it returns.
      */
     const seed = JSON.stringify(active().material);
+    /**
+     * The worker's own address, given back. A blob worker's location is the blob
+     * url, so everything the original script resolved against its own address
+     * broke: relative importScripts and fetch, and the public path a bundler
+     * derives from self.location, which is how a webpack worker loads its
+     * chunks. This puts the original url back before anything else runs.
+     */
+    const base = JSON.stringify(absolute.href);
+    const prologue =
+      `(function(){try{var b=new URL(${base});` +
+      `Object.defineProperty(self,'location',{configurable:true,get:function(){return b;}});` +
+      `var oi=self.importScripts;if(typeof oi==='function'){self.importScripts=function(){` +
+      `return oi.apply(self,Array.prototype.map.call(arguments,function(u){return new URL(String(u),b).href;}));};}` +
+      `var of=self.fetch;if(typeof of==='function'){self.fetch=function(i,o){` +
+      `return of.call(self,typeof i==='string'?new URL(i,b).href:i,o);};}}catch(e){}})();\n`;
     const body =
       opts?.type === 'module'
-        ? `'use strict';(${source})(${seed});\nimport ${JSON.stringify(absolute.href)};`
-        : `'use strict';(${source})(${seed});\nimportScripts(${JSON.stringify(absolute.href)});`;
+        ? `${prologue}'use strict';(${source})(${seed});\nimport ${base};`
+        : `${prologue}'use strict';(${source})(${seed});\nimportScripts(${base});`;
     return URL.createObjectURL(new Blob([body], { type: 'text/javascript' }));
   }
 
@@ -1263,7 +1278,11 @@
     if (ours && WORKER_DIRECTIVES.test(directive)) offEverything();
   });
 
-  for (const name of ['Worker', 'SharedWorker'] as const) {
+  // Dedicated workers only. A shared worker is identified by its url, and a
+  // fresh blob url per page meant two tabs could never share one, which breaks
+  // exactly what SharedWorker is for. Its scope reports the real machine, a gap
+  // that is cheaper than a broken site.
+  for (const name of ['Worker'] as const) {
     const Ctor = (globalThis as unknown as Record<string, unknown>)[name] as
       | (new (u: string | URL, o?: WorkerOptions) => object)
       | undefined;

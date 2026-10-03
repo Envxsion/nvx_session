@@ -34,9 +34,17 @@
    * is static and can only read. Copied from src/store/keys.ts.
    */
   const PERSONA = '__nvx~p';
-  /** Copied from src/store/keys.ts. Both keys are ours and neither is the page's. */
+  /**
+   * The session's script-readable cookies for this origin, kept beside the stamp
+   * so the next load in this tab can answer document.cookie before the worker
+   * has. Copied from src/store/keys.ts.
+   */
+  const JAR = '__nvx~c';
+  /** When this tab last reloaded to drop a stale stamp, so it can never loop. */
+  const RELOAD = '__nvx~r';
+  /** Copied from src/store/keys.ts. Every one of these keys is ours and none is the page's. */
   function reserved(key: string): boolean {
-    return key === STAMP || key === PERSONA;
+    return key === STAMP || key === PERSONA || key === JAR || key === RELOAD;
   }
   /**
    * The channel, and why only its first word is a name anybody can guess.
@@ -158,6 +166,216 @@
    * of thing that loops, so it is kept rather than lost.
    */
   const cookieJournal: string[] = [];
+
+  /**
+   * document.cookie in a managed tab, answered from the session.
+   *
+   * A rule strips Set-Cookie from every response a managed tab receives, so the
+   * browser's own jar only ever holds the profile's identity, and the worker
+   * keeps the session's. Reading the native jar would hand this session the
+   * wrong account's cookies; writing it would leak this session's cookies into
+   * every other tab on the site. So once the tab is known to be managed, reads
+   * and writes go through this view instead: seeded by the worker with the
+   * session's script-readable cookies for this site, kept current by its
+   * pushes, and saved beside the stamp so the next load starts correct.
+   *
+   * Field names are short because the list crosses three worlds on every load.
+   */
+  interface PageCookie {
+    n: string;
+    v: string;
+    d: string;
+    p: string;
+    h: boolean;
+    s: boolean;
+    e: number | null;
+  }
+  const jar = new Map<string, PageCookie>();
+  /** Writes from the pending window, re-applied over the worker's copy at commit. */
+  let replayed: string[] = [];
+  /** The namespace a stamped load committed to, checked against the first answer. */
+  let stampedFrom: string | null = null;
+  // Captured now, before a page can replace them to read what crosses the channel.
+  const rawParse = JSON.parse;
+  const rawStringify = JSON.stringify;
+  const cookieDesc = (() => {
+    try {
+      return Object.getOwnPropertyDescriptor(Document.prototype, 'cookie');
+    } catch {
+      return undefined;
+    }
+  })();
+
+  function jarKey(c: PageCookie): string {
+    return `${c.n}\n${c.d}\n${c.p}\n${c.h ? 1 : 0}`;
+  }
+
+  function mergeJar(list: unknown): void {
+    if (!Array.isArray(list)) return;
+    const now = Date.now();
+    for (const raw of list) {
+      if (!raw || typeof raw !== 'object') continue;
+      const c = raw as Partial<PageCookie>;
+      if (typeof c.n !== 'string' || typeof c.v !== 'string') continue;
+      if (typeof c.d !== 'string' || typeof c.p !== 'string') continue;
+      const cookie: PageCookie = {
+        n: c.n,
+        v: c.v,
+        d: c.d,
+        p: c.p,
+        h: c.h === true,
+        s: c.s === true,
+        e: typeof c.e === 'number' ? c.e : null,
+      };
+      if (cookie.e !== null && cookie.e <= now) jar.delete(jarKey(cookie));
+      else jar.set(jarKey(cookie), cookie);
+    }
+  }
+
+  function seedJar(list: unknown): void {
+    jar.clear();
+    mergeJar(list);
+  }
+
+  function saveJar(): void {
+    try {
+      if (mode === 'live' && real.session) real.session.setItem(JAR, rawStringify([...jar.values()]));
+    } catch {
+      /* quota or a disabled store; the next load waits for the worker instead */
+    }
+  }
+
+  function loadJar(): void {
+    try {
+      const raw = real.session?.getItem(JAR);
+      if (raw) seedJar(rawParse(raw));
+    } catch {
+      /* an unreadable snapshot is the same as none */
+    }
+  }
+
+  function pathMatches(path: string, cookiePath: string): boolean {
+    if (path === cookiePath) return true;
+    if (!path.startsWith(cookiePath)) return false;
+    return cookiePath.endsWith('/') || path[cookiePath.length] === '/';
+  }
+
+  function onSecureOrigin(): boolean {
+    return location.protocol === 'https:' || location.hostname === 'localhost';
+  }
+
+  /** The Cookie string this document would see, built the way the browser builds it. */
+  function readJar(): string {
+    const host = location.hostname;
+    const path = location.pathname || '/';
+    const now = Date.now();
+    const hits = [...jar.values()].filter(
+      (c) =>
+        (c.e === null || c.e > now) &&
+        (c.h ? host === c.d : host === c.d || host.endsWith(`.${c.d}`)) &&
+        pathMatches(path, c.p) &&
+        (!c.s || onSecureOrigin())
+    );
+    hits.sort((a, b) => b.p.length - a.p.length);
+    return hits.map((c) => (c.n ? `${c.n}=${c.v}` : c.v)).join('; ');
+  }
+
+  function defaultPath(): string {
+    const path = location.pathname || '/';
+    const i = path.lastIndexOf('/');
+    return i <= 0 ? '/' : path.slice(0, i);
+  }
+
+  /** One document.cookie assignment, as the parts the browser would act on. */
+  function parseWrite(value: string): PageCookie | null {
+    const parts = value.split(';');
+    const first = parts.shift() ?? '';
+    const eq = first.indexOf('=');
+    const n = (eq === -1 ? '' : first.slice(0, eq)).trim();
+    const v = (eq === -1 ? first : first.slice(eq + 1)).trim();
+    if (!n && !v) return null;
+    const host = location.hostname;
+    let d = host;
+    let h = true;
+    let p = defaultPath();
+    let s = false;
+    let e: number | null = null;
+    let maxAge: number | null = null;
+    for (const raw of parts) {
+      const i = raw.indexOf('=');
+      const k = (i === -1 ? raw : raw.slice(0, i)).trim().toLowerCase();
+      const val = i === -1 ? '' : raw.slice(i + 1).trim();
+      // A script cannot set an HttpOnly cookie; the browser drops the write.
+      if (k === 'httponly') return null;
+      if (k === 'domain' && val) {
+        const dom = val.replace(/^\./, '').toLowerCase();
+        if (host !== dom && !host.endsWith(`.${dom}`)) return null;
+        d = dom;
+        h = false;
+      } else if (k === 'path' && val.startsWith('/')) {
+        p = val;
+      } else if (k === 'secure') {
+        s = true;
+      } else if (k === 'max-age') {
+        const m = Number(val);
+        if (Number.isFinite(m)) maxAge = m;
+      } else if (k === 'expires') {
+        const t = Date.parse(val);
+        if (!Number.isNaN(t)) e = t;
+      }
+    }
+    if (maxAge !== null) e = maxAge <= 0 ? 0 : Date.now() + maxAge * 1000;
+    if (s && !onSecureOrigin()) return null;
+    if (n.startsWith('__Secure-') && !s) return null;
+    if (n.startsWith('__Host-') && (!s || !h || p !== '/')) return null;
+    return { n, v, d, p, h, s, e };
+  }
+
+  function writeJar(value: string): boolean {
+    const cookie = parseWrite(value);
+    if (!cookie) return false;
+    mergeJar([cookie]);
+    return true;
+  }
+
+  /** Take a pending-window write back out of the browser's own jar. */
+  function unsetNative(value: string): void {
+    const cookie = parseWrite(value);
+    if (!cookie || !cookie.n || !cookieDesc?.set) return;
+    const domain = cookie.h ? '' : `; Domain=${cookie.d}`;
+    try {
+      cookieDesc.set.call(document, `${cookie.n}=; Max-Age=0; Path=${cookie.p}${domain}`);
+    } catch {
+      /* the browser refused; the value stays where the page first put it */
+    }
+  }
+
+  /**
+   * A load that committed from its stamp, then told a different session.
+   *
+   * The stamp is per origin, and a rebind can only clear the origin the tab is
+   * on at that moment, so going Back to another origin can find the previous
+   * session's stamp. The page has already run with that session's storage for a
+   * few milliseconds, which is too long to patch up in place, so it reloads once
+   * with the stale stamp gone. The reload time is kept so this can never loop.
+   */
+  function staleStamp(answered: string | null): boolean {
+    const from = stampedFrom;
+    stampedFrom = null;
+    if (from === null || answered === from) return false;
+    try {
+      const last = Number(real.session?.getItem(RELOAD) ?? 0);
+      if (Date.now() - last < 10_000) return false;
+      real.session?.setItem(RELOAD, String(Date.now()));
+      real.session?.removeItem(STAMP);
+      real.session?.removeItem(JAR);
+      real.session?.removeItem(PERSONA);
+    } catch {
+      return false;
+    }
+    location.reload();
+    return true;
+  }
 
   function usableSessionId(id: string): boolean {
     return id.length > 0 && id.length <= 128 && !id.includes(SEP);
@@ -546,6 +764,368 @@
     true
   );
 
+  /**
+   * The rest of what a page shares with every other tab on its origin.
+   *
+   * Web Locks are named per origin, so two sessions elected one leader between
+   * them, and an auth library renewing tokens only in its leader tab let the
+   * other session's tokens lapse: names are scoped like storage keys. The
+   * cookie store API and FedCM read the browser's own jar and its signed-in
+   * accounts, which in a managed tab are another identity, so they are absent
+   * there and sites fall back to document.cookie and a sign-in popup, which do
+   * carry the session. A shared worker's requests have no tab, so no session.
+   */
+  const decided: (() => void)[] = [];
+  const whenDecided = () =>
+    mode === 'pending' ? new Promise<void>((resolve) => decided.push(resolve)) : Promise.resolve();
+  const lockName = (name: string) => (mode === 'live' && sid ? `${NS}${sid}${SEP}${name}` : name);
+  try {
+    const proto = window.LockManager?.prototype as unknown as Record<string, unknown> | undefined;
+    const request = proto?.request;
+    const query = proto?.query;
+    if (proto && typeof request === 'function') {
+      Object.defineProperty(proto, 'request', {
+        configurable: true,
+        writable: true,
+        value(this: LockManager, name: string, ...rest: unknown[]) {
+          return whenDecided().then(() =>
+            (request as (...a: unknown[]) => unknown).call(this, lockName(String(name)), ...rest)
+          );
+        },
+      });
+    }
+    if (proto && typeof query === 'function') {
+      Object.defineProperty(proto, 'query', {
+        configurable: true,
+        writable: true,
+        value(this: LockManager) {
+          return whenDecided()
+            .then(() => (query as () => Promise<LockManagerSnapshot>).call(this))
+            .then((snap) => {
+              const own = (list: LockInfo[] | undefined) =>
+                (list ?? []).flatMap((l) => {
+                  const n = l.name ?? '';
+                  if (mode === 'live' && sid) {
+                    const head = `${NS}${sid}${SEP}`;
+                    return n.startsWith(head) ? [{ ...l, name: n.slice(head.length) }] : [];
+                  }
+                  return isNamespaced(n) ? [] : [l];
+                });
+              return { held: own(snap.held), pending: own(snap.pending) };
+            });
+        },
+      });
+    }
+  } catch {
+    /* no Web Locks here */
+  }
+  const hideWhenManaged = (target: object, key: string) => {
+    try {
+      const desc =
+        Object.getOwnPropertyDescriptor(target, key) ??
+        Object.getOwnPropertyDescriptor(Object.getPrototypeOf(target) as object, key);
+      if (!desc) return;
+      const read = desc.get ?? (() => desc.value);
+      Object.defineProperty(target, key, {
+        configurable: true,
+        enumerable: desc.enumerable ?? false,
+        get() {
+          return mode === 'through' ? read.call(this) : undefined;
+        },
+        set(v: unknown) {
+          Object.defineProperty(target, key, { configurable: true, writable: true, value: v });
+        },
+      });
+    } catch {
+      /* left as it is */
+    }
+  };
+  hideWhenManaged(window, 'cookieStore');
+  hideWhenManaged(window, 'CookieStore');
+  hideWhenManaged(window, 'IdentityCredential');
+  hideWhenManaged(window, 'SharedWorker');
+  try {
+    const proto = window.CredentialsContainer?.prototype as unknown as Record<string, unknown> | undefined;
+    const get = proto?.get;
+    if (proto && typeof get === 'function') {
+      Object.defineProperty(proto, 'get', {
+        configurable: true,
+        writable: true,
+        value(this: CredentialsContainer, options?: { identity?: unknown }, ...rest: unknown[]) {
+          if (!options || !('identity' in options)) return (get as (...a: unknown[]) => unknown).call(this, options, ...rest);
+          return whenDecided().then(() =>
+            mode === 'through'
+              ? (get as (...a: unknown[]) => unknown).call(this, options, ...rest)
+              : Promise.reject(new DOMException('Browser sign-in is off in an isolated session.', 'NotAllowedError'))
+          );
+        },
+      });
+    }
+  } catch {
+    /* no credential management here */
+  }
+
+  /**
+   * The page's first request waits until its session's rules are current.
+   *
+   * A page's own response can set a cookie the page then needs at once: a form
+   * posted on load, a fetch the moment the script runs. The rule carrying that
+   * cookie is installed a few milliseconds after the response, so the request
+   * left without it, and a POST cannot be asked for again. So the first request
+   * of a document in a session waits one round trip to the worker, which
+   * answers once every rule it owes is in. After that nothing waits. Not in a
+   * frame, which has no agent to answer, and not on an unmanaged page.
+   */
+  const settleWaiters: (() => void)[] = [];
+  let settled: Promise<void> | null = null;
+  // A response can carry a cookie the next request needs, and a sign-in step
+  // sends that next request at once. So a request sent shortly after a response
+  // waits too, once per response, and one sent later does not.
+  let lastResponse = -1;
+  let settledFor = -1;
+  const markResponse = () => {
+    lastResponse = performance.now();
+  };
+  const inFrame = (() => {
+    try {
+      return window.top !== window;
+    } catch {
+      return true;
+    }
+  })();
+  const needsSettle = () => {
+    if (inFrame || mode === 'through') return false;
+    if (settled === null) return true;
+    return lastResponse > settledFor && performance.now() - lastResponse < 300;
+  };
+  let inFlight: Promise<void> | null = null;
+  function settle(): Promise<void> {
+    if (inFlight) return inFlight;
+    settledFor = Math.max(lastResponse, 0);
+    inFlight = new Promise<void>((resolve) => {
+      settleWaiters.push(resolve);
+      tell('settle');
+      setTimeout(resolve, 1500);
+    }).then(() => {
+      inFlight = null;
+    });
+    settled = inFlight;
+    return inFlight;
+  }
+  try {
+    const nativeFetch = window.fetch;
+    if (typeof nativeFetch === 'function') {
+      const tracked = (p: Promise<Response>) =>
+        p.then(
+          (r) => {
+            markResponse();
+            return r;
+          },
+          (e: unknown) => {
+            markResponse();
+            throw e;
+          }
+        );
+      window.fetch = function (this: unknown, ...args: Parameters<typeof fetch>) {
+        if (!needsSettle()) return tracked(nativeFetch.apply(this, args));
+        return settle().then(() => tracked(nativeFetch.apply(this, args)));
+      } as typeof fetch;
+    }
+    const xhr = window.XMLHttpRequest?.prototype as unknown as Record<string, unknown> | undefined;
+    const send = xhr?.send;
+    const open = xhr?.open;
+    if (xhr && typeof send === 'function' && typeof open === 'function') {
+      const sync = new WeakSet<object>();
+      Object.defineProperty(xhr, 'open', {
+        configurable: true,
+        writable: true,
+        value(this: XMLHttpRequest, ...args: unknown[]) {
+          if (args[2] === false) sync.add(this);
+          return (open as (...a: unknown[]) => unknown).apply(this, args);
+        },
+      });
+      Object.defineProperty(xhr, 'send', {
+        configurable: true,
+        writable: true,
+        value(this: XMLHttpRequest, ...args: unknown[]) {
+          // A synchronous request cannot be held without blocking the page.
+          this.addEventListener('loadend', markResponse);
+          if (!needsSettle() || sync.has(this)) return (send as (...a: unknown[]) => unknown).apply(this, args);
+          void settle().then(() => (send as (...a: unknown[]) => unknown).apply(this, args));
+        },
+      });
+    }
+  } catch {
+    /* left native */
+  }
+
+  /**
+   * A form posted into a new tab, held until that tab is in this session.
+   *
+   * A new tab is put in its session when the browser reports it, which is after
+   * it has started loading, so a POST into one went out with no cookies: the
+   * AWS console's "add session" opened a tab that answered with a 404. A GET can
+   * be loaded again, a POST cannot, so the post waits. The tab is opened blank
+   * first, the worker says when it is bound and its rules are in, and the form
+   * is then submitted into it. On an unmanaged page nothing here runs.
+   */
+  const SAME_CONTEXT = new Set(['', '_self', '_parent', '_top']);
+  const childReady: (() => void)[] = [];
+  const awaitChild = () =>
+    new Promise<void>((resolve) => {
+      childReady.push(resolve);
+      tell('child');
+      setTimeout(resolve, 3000);
+    });
+  let holdingForm = false;
+  function opensNewTab(form: HTMLFormElement, submitter?: HTMLElement | null): string | null {
+    const target = (submitter?.getAttribute('formtarget') ?? form.getAttribute('target') ?? '').trim();
+    if (SAME_CONTEXT.has(target.toLowerCase())) return null;
+    const method = (submitter?.getAttribute('formmethod') ?? form.getAttribute('method') ?? 'get').toLowerCase();
+    if (method !== 'post') return null;
+    try {
+      // A name already taken by a frame or window posts there, not to a new tab.
+      if (target !== '_blank' && (window.frames as unknown as Record<string, unknown>)[target]) return null;
+    } catch {
+      return null;
+    }
+    return target;
+  }
+  const Form = typeof HTMLFormElement === 'function' ? HTMLFormElement : null;
+  const nativeSubmit = Form ? Form.prototype.submit : null;
+  function holdAndPost(form: HTMLFormElement, target: string, submitter?: HTMLElement | null): void {
+    holdingForm = true;
+    const name = target === '_blank' ? `nvx${Math.random().toString(36).slice(2)}` : target;
+    const extra: HTMLInputElement[] = [];
+    const named = submitter as HTMLButtonElement | HTMLInputElement | null | undefined;
+    if (named?.name) {
+      const carry = document.createElement('input');
+      carry.type = 'hidden';
+      carry.name = named.name;
+      carry.value = named.value ?? '';
+      extra.push(carry);
+    }
+    try {
+      window.open('about:blank', name);
+    } catch {
+      /* a blocked popup posts into the named target as it would have */
+    }
+    void awaitChild().then(() => {
+      const before = form.getAttribute('target');
+      form.setAttribute('target', name);
+      for (const e of extra) form.appendChild(e);
+      try {
+        nativeSubmit?.call(form);
+      } finally {
+        for (const e of extra) e.remove();
+        if (before === null) form.removeAttribute('target');
+        else form.setAttribute('target', before);
+        holdingForm = false;
+      }
+    });
+  }
+  window.addEventListener(
+    'submit',
+    (e) => {
+      if (mode !== 'live' || holdingForm || e.defaultPrevented) return;
+      const form = e.target as HTMLFormElement | null;
+      if (!Form || !(form instanceof Form)) return;
+      const submitter = (e as SubmitEvent).submitter ?? null;
+      const target = opensNewTab(form, submitter);
+      if (target === null) {
+        const method = (submitter?.getAttribute('formmethod') ?? form.getAttribute('method') ?? 'get').toLowerCase();
+        if (method !== 'post' || !needsSettle()) return;
+        e.preventDefault();
+        void settle().then(() => nativeSubmit?.call(form));
+        return;
+      }
+      e.preventDefault();
+      holdAndPost(form, target, submitter);
+    },
+    false
+  );
+  try {
+    if (Form && nativeSubmit) Object.defineProperty(Form.prototype, 'submit', {
+      configurable: true,
+      writable: true,
+      value(this: HTMLFormElement) {
+        const target = mode === 'live' && !holdingForm ? opensNewTab(this) : null;
+        if (target === null) {
+          const method = (this.getAttribute('method') ?? 'get').toLowerCase();
+          if (method === 'post' && needsSettle()) {
+            void settle().then(() => nativeSubmit.call(this));
+            return;
+          }
+          return nativeSubmit.call(this);
+        }
+        holdAndPost(this, target);
+      },
+    });
+  } catch {
+    /* left native */
+  }
+
+  /**
+   * BroadcastChannel, namespaced like storage.
+   *
+   * A channel is shared by every same-origin context by name, so two sessions
+   * on one site heard each other: an auth library syncing tokens across tabs
+   * (Okta's does it this way) handed one session's token to the other, and a
+   * sign-out in one signed the other out. The page keeps its own name; the
+   * channel underneath is per session. Created before the session is known, a
+   * channel queues what it posts and opens its real channel on commit.
+   */
+  const channelsWaiting: (() => void)[] = [];
+  try {
+    const Native = window.BroadcastChannel;
+    if (typeof Native === 'function') {
+      const scoped = (name: string) => (mode === 'live' && sid ? `${NS}${sid}${SEP}${name}` : name);
+      class Channel extends EventTarget {
+        readonly name: string;
+        onmessage: ((this: Channel, ev: MessageEvent) => unknown) | null = null;
+        onmessageerror: ((this: Channel, ev: MessageEvent) => unknown) | null = null;
+        private inner: BroadcastChannel | null = null;
+        private queued: unknown[] = [];
+        private closed = false;
+        constructor(name: string) {
+          super();
+          this.name = String(name);
+          if (mode === 'pending') channelsWaiting.push(() => this.open());
+          else this.open();
+        }
+        private open(): void {
+          if (this.closed || this.inner) return;
+          const inner = new Native(scoped(this.name));
+          const relay = (type: 'message' | 'messageerror') => (e: Event) => {
+            const m = e as MessageEvent;
+            const out = new MessageEvent(type, { data: m.data, origin: m.origin, lastEventId: m.lastEventId });
+            const handler = type === 'message' ? this.onmessage : this.onmessageerror;
+            if (typeof handler === 'function') handler.call(this, out);
+            this.dispatchEvent(out);
+          };
+          inner.onmessage = relay('message');
+          inner.onmessageerror = relay('messageerror');
+          this.inner = inner;
+          for (const data of this.queued.splice(0)) inner.postMessage(data);
+        }
+        postMessage(data: unknown): void {
+          if (this.closed) throw new DOMException('BroadcastChannel is closed.', 'InvalidStateError');
+          if (this.inner) this.inner.postMessage(data);
+          else this.queued.push(structuredClone(data));
+        }
+        close(): void {
+          this.closed = true;
+          this.queued = [];
+          this.inner?.close();
+          this.inner = null;
+        }
+      }
+      Object.defineProperty(window, 'BroadcastChannel', { configurable: true, writable: true, value: Channel });
+    }
+  } catch {
+    /* no BroadcastChannel here, so nothing to keep apart */
+  }
+
   // -------------------------------------------------------------- handshake
 
   function tell(kind: string, detail: Record<string, unknown> = {}): void {
@@ -618,6 +1198,9 @@
     }
 
     tell('state', { sid, mode, forked, idb: idbUsed });
+    settleWorkers();
+    for (const rebind of channelsWaiting.splice(0)) rebind();
+    for (const go of decided.splice(0)) go();
 
     // Replay any document.cookie writes made before the session was known. On a
     // managed tab they belong in the store; on an unmanaged one they were only
@@ -625,7 +1208,13 @@
     if (cookieJournal.length) {
       const pending = cookieJournal.splice(0);
       if (mode === 'live') {
-        for (const value of pending) tell('cookie', { value, url: location.href });
+        for (const value of pending) {
+          tell('cookie', { value, url: location.href });
+          // It also went to the browser's own jar while nobody knew better.
+          // Taken back out, so this session's write does not reach other tabs.
+          unsetNative(value);
+        }
+        replayed = pending;
       }
     }
   }
@@ -642,6 +1231,64 @@
    * session, is a Pro feature that lives outside this free shim.
    */
   let idbUsed = false;
+
+  /**
+   * Service workers, off in a managed tab.
+   *
+   * A worker is one per origin and shared by every tab on it, whichever session
+   * each tab is in, and the requests it makes carry no tab. With two sessions on
+   * a site, those requests matched no session's rule and went out with the
+   * browser's own cookies: YouTube's worker had both sessions' tabs showing the
+   * profile's account. No rule can say which tab a worker request is for, so a
+   * managed page does not get one. Registration fails as it does in a private
+   * window, which every site has to handle, and a worker already controlling
+   * the page is unregistered and the page loaded once more without it.
+   */
+  const workerReady: ((managed: boolean) => void)[] = [];
+  function settleWorkers(): void {
+    const managed = mode === 'live';
+    for (const resolve of workerReady.splice(0)) resolve(managed);
+    if (!managed) return;
+    const container = navigator.serviceWorker;
+    if (!container) return;
+    const controlled = Boolean(container.controller);
+    void container
+      .getRegistrations()
+      .then((all) => Promise.all(all.map((r) => r.unregister())))
+      .then(() => {
+        if (!controlled) return;
+        try {
+          const last = Number(real.session?.getItem(RELOAD) ?? 0);
+          if (Date.now() - last < 10_000) return;
+          real.session?.setItem(RELOAD, String(Date.now()));
+        } catch {
+          return;
+        }
+        location.reload();
+      })
+      .catch(() => undefined);
+  }
+  try {
+    const proto = window.ServiceWorkerContainer?.prototype as unknown as Record<string, unknown> | undefined;
+    const register = proto?.register;
+    if (proto && typeof register === 'function') {
+      Object.defineProperty(proto, 'register', {
+        configurable: true,
+        writable: true,
+        value(this: ServiceWorkerContainer, ...args: unknown[]) {
+          const refuse = () =>
+            Promise.reject(new DOMException('Service workers are off in an isolated session.', 'SecurityError'));
+          if (mode === 'live') return refuse();
+          if (mode === 'through') return (register as (...a: unknown[]) => unknown).apply(this, args);
+          return new Promise<boolean>((resolve) => workerReady.push(resolve)).then((managed) =>
+            managed ? refuse() : (register as (...a: unknown[]) => unknown).apply(this, args)
+          );
+        },
+      });
+    }
+  } catch {
+    /* no worker support here, so nothing to keep off */
+  }
 
   // IndexedDB: open reports the first use of a shared database to the worker.
   try {
@@ -672,32 +1319,23 @@
   }
 
   /**
-   * document.cookie, routed so a page-set cookie reaches the wire.
+   * document.cookie, answered from the session in a managed tab.
    *
-   * A cookie the page sets with document.cookie goes into the browser's own jar,
-   * but the header rewrite then replaces the Cookie header from the session
-   * store, so the write never leaves the machine. A site that sets a probe
-   * cookie and reads it back on its next request, which is how Google and Slack
-   * check that cookies work, sees it gone and declares cookies disabled, then
-   * loops. This forwards each write to the worker, which puts it in the store so
-   * the next request carries it. The value still goes to the native jar, so the
-   * page's own document.cookie reads are unchanged; only the store is taught.
+   * Live: reads come from the session view above, and writes go into it and on
+   * to the worker, never into the browser's own jar, because that jar is shared
+   * by every tab on the site. A site that sets a probe cookie and reads it back
+   * (Google and Slack both do) sees it, and so does the next request.
    *
-   * Writes only. Reads stay native, because the jar already holds what the page
-   * set and reading it back is exactly right. Nothing is forwarded on an
-   * unmanaged tab, and a write during the pending window is journalled and
-   * replayed on commit rather than dropped.
+   * Pending: the session is not known yet, so the page gets the browser's own
+   * behaviour, and each write is journalled. If the tab turns out to be managed
+   * the journal is forwarded and the native copy taken back out; if not, the
+   * native write was simply correct. Through: native, untouched.
    */
   function forwardCookie(value: string): void {
-    if (mode === 'through') return;
-    if (mode === 'pending') {
-      cookieJournal.push(value);
-      return;
-    }
     tell('cookie', { value, url: location.href });
   }
   try {
-    const desc = Object.getOwnPropertyDescriptor(Document.prototype, 'cookie');
+    const desc = cookieDesc;
     if (desc && typeof desc.get === 'function' && typeof desc.set === 'function') {
       const nativeGet = desc.get;
       const nativeSet = desc.set;
@@ -705,17 +1343,24 @@
         configurable: true,
         enumerable: desc.enumerable ?? true,
         get(this: Document): string {
+          if (mode === 'live' && this === document) return readJar();
           return nativeGet.call(this) as string;
         },
         set(this: Document, value: string) {
-          // Native first, so the browser jar and the page's own reads behave
-          // exactly as before even if forwarding throws.
-          nativeSet.call(this, value);
-          try {
-            forwardCookie(String(value));
-          } catch {
-            /* forwarding is best effort; the native write already happened */
+          const text = String(value);
+          if (mode === 'live' && this === document) {
+            if (writeJar(text)) {
+              saveJar();
+              try {
+                forwardCookie(text);
+              } catch {
+                /* forwarding is best effort; the view already holds the write */
+              }
+            }
+            return;
           }
+          nativeSet.call(this, value);
+          if (mode === 'pending' && this === document) cookieJournal.push(text);
         },
       });
     }
@@ -729,14 +1374,23 @@
   });
 
   rawListen.call(document, `${CHANNEL}.commit`, (e) => {
-    let payload: { sid?: unknown; fork?: unknown; persona?: unknown } = {};
+    let payload: { sid?: unknown; fork?: unknown; persona?: unknown; cookies?: unknown } = {};
     try {
       payload = JSON.parse(String((e as CustomEvent).detail ?? '{}'));
     } catch {
       return;
     }
     acked = true;
-    commit(typeof payload.sid === 'string' ? payload.sid : null, payload.fork === true);
+    const answered = typeof payload.sid === 'string' ? payload.sid : null;
+    if (staleStamp(answered)) return;
+    commit(answered, payload.fork === true);
+    // The worker's copy of the session's cookies for this site, with anything
+    // the page wrote before it was known laid back over the top.
+    if (mode === 'live') {
+      if (Array.isArray(payload.cookies)) seedJar(payload.cookies);
+      for (const w of replayed.splice(0)) writeJar(w);
+      saveJar();
+    }
     // After the commit, because whether a persona is written depends on the mode
     // that commit just settled.
     setPersona(
@@ -748,10 +1402,30 @@
     );
   });
 
+  rawListen.call(document, `${CHANNEL}.settle.ready`, () => {
+    for (const go of settleWaiters.splice(0)) go();
+  });
+
+  rawListen.call(document, `${CHANNEL}.child.ready`, () => {
+    for (const go of childReady.splice(0)) go();
+  });
+
+  rawListen.call(document, `${CHANNEL}.jar`, (e) => {
+    if (mode !== 'live') return;
+    try {
+      const payload = rawParse(String((e as CustomEvent).detail ?? '{}')) as { cookies?: unknown };
+      mergeJar(payload.cookies);
+      saveJar();
+    } catch {
+      /* malformed; the next push or load corrects it */
+    }
+  });
+
   rawListen.call(document, `${CHANNEL}.reset`, () => {
     try {
       real.session?.removeItem(STAMP);
       real.session?.removeItem(PERSONA);
+      real.session?.removeItem(JAR);
     } catch {
       /* nothing to clear */
     }
@@ -800,7 +1474,11 @@
   } catch {
     stamped = null;
   }
-  if (stamped && usableSessionId(stamped)) commit(stamped, false);
+  if (stamped && usableSessionId(stamped)) {
+    commit(stamped, false);
+    stampedFrom = stamped;
+    loadJar();
+  }
 
   /** A subframe has no agent, so silence there means something different. */
   const subframe = (() => {
@@ -836,6 +1514,7 @@
       }
       if (seen && usableSessionId(seen)) {
         commit(seen, false);
+        loadJar();
         return;
       }
       if (++tries > 20) {

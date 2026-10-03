@@ -724,8 +724,42 @@ let channel = '';
 /** Set when the shim announced itself, so a page with no shim is not waited on. */
 let shimReady = false;
 /** Held until the worker answers, then delivered. */
-let shimAnswer: { sid: string | null; fork: boolean; persona?: string | null; idb?: boolean } | null =
+let shimAnswer: {
+  sid: string | null;
+  fork: boolean;
+  persona?: string | null;
+  idb?: boolean;
+  cookies?: Record<string, unknown>[];
+} | null =
   null;
+
+/**
+ * The session's cookies this document's own host can see. Chosen here, in the
+ * isolated world, so the page never receives another site's cookies even
+ * inside a message it cannot read.
+ */
+function ownCookies(list: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(list)) return [];
+  const host = location.hostname;
+  return list.filter((c): c is Record<string, unknown> => {
+    if (!c || typeof c !== 'object') return false;
+    const d = (c as { d?: unknown }).d;
+    if (typeof d !== 'string' || !d) return false;
+    return (c as { h?: unknown }).h === true ? host === d : host === d || host.endsWith(`.${d}`);
+  });
+}
+
+// Cookies the session gained or lost in another tab or frame, so this page's
+// document.cookie stays current without a reload.
+try {
+  chrome.runtime.onMessage.addListener((msg: unknown) => {
+    if (!msg || typeof msg !== 'object' || (msg as { kind?: unknown }).kind !== 'nvx.jar') return;
+    const cookies = ownCookies((msg as { cookies?: unknown }).cookies);
+    if (cookies.length) toShim('jar', { cookies });
+  });
+} catch {
+  /* the extension context is already gone */
+}
 
 function toShim(kind: string, detail: Record<string, unknown> = {}): void {
   if (!channel) return;
@@ -744,6 +778,12 @@ function toShim(kind: string, detail: Record<string, unknown> = {}): void {
 // first at document_start, so this listener exists before it announces itself.
 // Attaching it a tick later would miss the announcement on every page.
 rawListen.call(document, ANNOUNCE, (e: Event) => {
+  // First announcement only. The shim is registered at document_start and
+  // announces before any page script exists, so the first one is always the
+  // shim's. Accepting later ones let a page announce a channel of its own
+  // choosing and receive the namespace token and persona on it, then relay
+  // forged cookie writes through it.
+  if (channel) return;
   try {
     const raw = JSON.parse(String((e as CustomEvent).detail ?? '{}')) as { channel?: unknown };
     if (typeof raw.channel !== 'string' || !raw.channel) return;
@@ -792,10 +832,24 @@ rawListen.call(document, ANNOUNCE, (e: Event) => {
         url?: unknown;
       };
       if (typeof raw.value !== 'string' || !raw.value) return;
-      onShimCookie?.(raw.value, typeof raw.url === 'string' ? raw.url : location.href);
+      // Always this frame's own address, never one named in the event: a
+      // document.cookie write can only ever apply to the document doing it.
+      onShimCookie?.(raw.value, location.href);
     } catch {
       /* malformed, and the shim is the only thing that sends these */
     }
+  });
+
+  // The page is about to post a form into a new tab and is holding it until
+  // the tab is in this session.
+  rawListen.call(document, `${channel}.settle`, () => {
+    if (onShimSettle) onShimSettle();
+    else toShim('settle.ready');
+  });
+
+  rawListen.call(document, `${channel}.child`, () => {
+    if (onShimChild) onShimChild();
+    else toShim('child.ready');
   });
 
   // Synchronous, so the shim knows to hold rather than deciding it is on an
@@ -807,6 +861,8 @@ rawListen.call(document, ANNOUNCE, (e: Event) => {
 let onShimState: ((s: ShimState) => void) | null = null;
 let onShimIdb: (() => void) | null = null;
 let onShimCookie: ((value: string, url: string) => void) | null = null;
+let onShimChild: (() => void) | null = null;
+let onShimSettle: (() => void) | null = null;
 
 
 
@@ -855,6 +911,22 @@ function connect(): void {
     }
   };
 
+  onShimSettle = () => {
+    try {
+      port.postMessage({ kind: 'settle' });
+    } catch {
+      toShim('settle.ready');
+    }
+  };
+
+  onShimChild = () => {
+    try {
+      port.postMessage({ kind: 'child.wait' });
+    } catch {
+      toShim('child.ready');
+    }
+  };
+
   onShimCookie = (value, url) => {
     try {
       port.postMessage({ kind: 'page.cookie', value, url });
@@ -875,6 +947,7 @@ function connect(): void {
             fork: boolean;
             persona?: string | null;
             idb?: boolean;
+            cookies?: unknown;
           }
         | { kind: 'storage.reset' }
         | { kind: 'note'; text: string; accent: string; strong?: string }
@@ -899,6 +972,7 @@ function connect(): void {
         // The IndexedDB isolation gate, relayed so the shim can turn namespacing
         // on and off when a Pro licence changes without the tab reloading.
         idb: msg.idb === true,
+        cookies: ownCookies(msg.cookies),
       };
       // Held rather than sent when the shim has not announced itself yet: on a
       // cold worker the answer can arrive first, and a commit nobody is
@@ -908,6 +982,14 @@ function connect(): void {
     }
     if (msg?.kind === 'storage.reset') {
       toShim('reset');
+      return;
+    }
+    if ((msg as { kind?: string })?.kind === 'settle.ready') {
+      toShim('settle.ready');
+      return;
+    }
+    if ((msg as { kind?: string })?.kind === 'child.ready') {
+      toShim('child.ready');
       return;
     }
     if (msg?.kind === 'note') {

@@ -19,6 +19,8 @@ import {
   NS,
   SEP,
   PERSONA,
+  JAR,
+  RELOAD,
   STAMP,
   forkPlan,
   isNamespaced,
@@ -136,6 +138,14 @@ interface Harness {
   commitWith(payload: Record<string, unknown>): void;
   /** The IndexedDB reports the shim forwarded, in order. */
   idb: Array<{ used: boolean }>;
+  /** The browser's own jar, read past the shim's wrap. */
+  native(): string;
+  /** Writes the browser's own jar directly, as another tab or the profile would. */
+  setNative(value: string): void;
+  /** A cookie push from the worker, as the agent relays it. */
+  push(cookies: unknown[]): void;
+  /** How many times the shim reloaded the page. */
+  reloads(): number;
   states: Array<{ sid: string | null; mode: string; forked: number }>;
   /** The nonce the shim announced, so a test can assert it is not guessable. */
   channel(): string;
@@ -159,6 +169,8 @@ async function boot(
     indexedDB?: unknown;
     /** A fake CacheStorage, injected before the shim wraps it at load. */
     caches?: unknown;
+    /** Hands the shim Node's real BroadcastChannel to wrap. */
+    broadcast?: boolean;
   } = {}
 ): Promise<Harness> {
   const local = new FakeStorage();
@@ -184,7 +196,8 @@ async function boot(
       const kept = (this.jar ? this.jar.split('; ') : []).filter(
         (p) => p.split('=')[0] !== name
       );
-      kept.push(pair);
+      // A Max-Age of zero deletes, as the browser's jar does.
+      if (!/;\s*max-age=0/i.test(String(value))) kept.push(pair);
       this.jar = kept.filter(Boolean).join('; ');
     }
   }
@@ -197,6 +210,7 @@ async function boot(
   // once at document_start; a factory set afterwards would never be wrapped.
   if (opts.indexedDB) win.indexedDB = opts.indexedDB;
   if (opts.caches) win.caches = opts.caches;
+  if (opts.broadcast) win.BroadcastChannel = globalThis.BroadcastChannel;
   // A subframe shares the tab's storage but never gets an agent.
   win.top = opts.subframe ? {} : win;
 
@@ -207,7 +221,12 @@ async function boot(
   g.document = doc;
   // The shim reads location.href when it forwards a cookie. A bare location in a
   // content script's world is window.location; the tests only need an href.
-  g.location = { href: 'https://example.com/' };
+  let reloadCount = 0;
+  const loc = new URL('https://example.com/') as unknown as Record<string, unknown>;
+  loc.reload = () => {
+    reloadCount++;
+  };
+  g.location = loc;
 
   /**
    * The harness learns the channel the way the agent does, because there is no
@@ -243,6 +262,8 @@ async function boot(
     }
   });
 
+  const nativeCookie = Object.getOwnPropertyDescriptor(FakeDocument.prototype, 'cookie')!;
+
   vi.resetModules();
   await import('../src/content/shim.js');
 
@@ -268,6 +289,13 @@ async function boot(
     idb,
     states,
     channel: () => channel,
+    native: () => nativeCookie.get!.call(doc) as string,
+    setNative: (value) => nativeCookie.set!.call(doc, value),
+    push: (list) =>
+      doc.dispatchEvent(
+        new CustomEvent(`${channel}.jar`, { detail: JSON.stringify({ cookies: list }) })
+      ),
+    reloads: () => reloadCount,
   };
 }
 
@@ -336,6 +364,8 @@ describe('the shim, running', () => {
     expect(src).toContain(`const SEP = '${SEP}'`);
     expect(src).toContain(`const STAMP = '${STAMP}'`);
     expect(src).toContain(`const PERSONA = '${PERSONA}'`);
+    expect(src).toContain(`const JAR = '${JAR}'`);
+    expect(src).toContain(`const RELOAD = '${RELOAD}'`);
   });
 
   /**
@@ -610,34 +640,96 @@ describe('the shim, running', () => {
 });
 
 /**
- * document.cookie, routed so a page-set cookie reaches the wire.
+ * document.cookie in a managed tab is the session's, never the browser's.
  *
- * A cookie the page sets with script goes into the browser jar, but the header
- * rewrite then replaces the Cookie header from the session store, so the write
- * never leaves the machine and a site that reads its probe cookie back declares
- * cookies disabled. The shim forwards each managed write to the worker, which
- * puts it in the store. These pin that it forwards the right thing, only when it
- * should, and never at the cost of the page's own reads.
+ * A rule strips Set-Cookie from a managed tab's responses, so the browser's own
+ * jar only holds the profile's identity. A managed page therefore reads and
+ * writes a session view the worker seeds and keeps current, and a page-set
+ * cookie still reaches the wire because each write is forwarded to the store.
+ * These pin that the view is right, that nothing lands in the shared jar, and
+ * that an unmanaged tab is left exactly as the browser would have it.
  */
 describe('the cookie shim, running', () => {
-  it('forwards a managed write to the worker, and the jar still has it', async () => {
+  const cookie = (over: Record<string, unknown> = {}) => ({
+    n: 'tok',
+    v: '1',
+    d: 'example.com',
+    p: '/',
+    h: true,
+    s: false,
+    e: null,
+    ...over,
+  });
+
+  it('answers a managed write from the session, and keeps it out of the browser jar', async () => {
     const h = await boot();
     h.commit('s_a1');
     h.doc.cookie = 'SID=abc; path=/; secure';
     // The whole value, attributes and all, so the worker can parse path and
     // expiry exactly as it would a Set-Cookie header.
     expect(h.cookies).toContainEqual({ value: 'SID=abc; path=/; secure', url: 'https://example.com/' });
-    // The native jar was written too, so the page's own read is unchanged.
     expect(h.doc.cookie).toBe('SID=abc');
+    // The shared jar never saw it, so no other tab on the site can.
+    expect(h.native()).toBe('');
   });
 
-  it('leaves reads native, returning every cookie the page set', async () => {
+  it('reads back every cookie the page set', async () => {
     const h = await boot();
     h.commit('s_a1');
     h.doc.cookie = 'a=1';
     h.doc.cookie = 'b=2';
     expect(h.doc.cookie).toBe('a=1; b=2');
     expect(h.cookies.map((c) => c.value)).toEqual(['a=1', 'b=2']);
+  });
+
+  it('reads the session, not the browser jar, once the tab is managed', async () => {
+    const h = await boot();
+    h.setNative('profile=other-account'); // the profile's own identity, in the shared jar
+    h.commitWith({ sid: 's_a1', fork: false, cookies: [cookie()] });
+    expect(h.doc.cookie).toBe('tok=1');
+    expect(h.doc.cookie).not.toContain('other-account');
+  });
+
+  it('keeps reads current as the worker pushes changes', async () => {
+    const h = await boot();
+    h.commitWith({ sid: 's_a1', fork: false, cookies: [cookie()] });
+    h.push([cookie({ v: '2' })]);
+    expect(h.doc.cookie).toBe('tok=2');
+    h.push([cookie({ e: 1 })]); // expired: a deletion
+    expect(h.doc.cookie).toBe('');
+  });
+
+  it('shows only cookies this page could see', async () => {
+    const h = await boot();
+    h.commitWith({
+      sid: 's_a1',
+      fork: false,
+      cookies: [
+        cookie({ n: 'other', d: 'other.com' }),
+        cookie({ n: 'deep', p: '/admin' }),
+        cookie({ n: 'apex', d: 'com', h: true }),
+        cookie({ n: 'shared', d: 'example.com', h: false }),
+      ],
+    });
+    expect(h.doc.cookie).toBe('shared=1');
+  });
+
+  it('refuses a script write the browser would refuse', async () => {
+    const h = await boot();
+    h.commit('s_a1');
+    h.doc.cookie = 'x=1; HttpOnly';
+    h.doc.cookie = 'y=1; Domain=other.com';
+    h.doc.cookie = '__Host-z=1; Path=/'; // __Host- needs Secure
+    expect(h.doc.cookie).toBe('');
+    expect(h.cookies).toEqual([]);
+  });
+
+  it('deletes with Max-Age=0', async () => {
+    const h = await boot();
+    h.commit('s_a1');
+    h.doc.cookie = 'gone=1';
+    h.doc.cookie = 'gone=; Max-Age=0';
+    expect(h.doc.cookie).toBe('');
   });
 
   it('forwards nothing on an unmanaged tab', async () => {
@@ -647,24 +739,109 @@ describe('the cookie shim, running', () => {
     expect(h.cookies).toEqual([]);
     // Native behaviour is untouched: the write still lands in the jar.
     expect(h.doc.cookie).toBe('x=y');
+    expect(h.native()).toBe('x=y');
   });
 
-  it('replays a write made before the session was known, on commit', async () => {
+  it('replays a write made before the session was known, and takes it back out of the browser jar', async () => {
     const h = await boot();
-    // A page script that sets a cookie before the worker has answered. Nothing
-    // is forwarded yet, because there is no session to forward it to.
+    // Before the worker answers, the page gets the browser's own behaviour.
     h.doc.cookie = 'early=1';
     expect(h.cookies).toEqual([]);
-    // The moment the session is known, the held write is sent.
+    expect(h.native()).toBe('early=1');
+    // The moment the session is known, the held write is sent, kept in the
+    // session view, and removed from the shared jar.
     h.commit('s_a1');
     expect(h.cookies).toContainEqual({ value: 'early=1', url: 'https://example.com/' });
+    expect(h.doc.cookie).toBe('early=1');
+    expect(h.native()).toBe('');
   });
 
-  it('drops a pending write when the tab turns out to be unmanaged', async () => {
+  it('leaves a pending write native when the tab turns out to be unmanaged', async () => {
     const h = await boot();
     h.doc.cookie = 'early=1';
     h.commit(null); // through: the write was only ever native, so it is not sent
     expect(h.cookies).toEqual([]);
     expect(h.doc.cookie).toBe('early=1');
+  });
+
+  it('starts the next load in the tab from the saved view', async () => {
+    const h = await boot({
+      session: { [STAMP]: 's_a1', [JAR]: JSON.stringify([cookie({ v: 'saved' })]) },
+    });
+    // No answer from the worker yet, and the first script already reads right.
+    expect(h.doc.cookie).toBe('tok=saved');
+    // And the shim's own keys stay invisible to the page.
+    expect(h.page.sessionStorage.getItem(JAR)).toBeNull();
+  });
+
+  it('reloads once when a stamp from before a rebind names another session', async () => {
+    const h = await boot({ session: { [STAMP]: 's_old' } });
+    h.commit('s_new');
+    expect(h.reloads()).toBe(1);
+    expect(h.session.getItem(STAMP)).toBeNull();
+  });
+
+  it('does not reload when the stamp was right', async () => {
+    const h = await boot({ session: { [STAMP]: 's_a1' } });
+    h.commit('s_a1');
+    expect(h.reloads()).toBe(0);
+  });
+});
+
+describe('BroadcastChannel between sessions', () => {
+  type Ch = { postMessage(d: unknown): void; close(): void; onmessage: ((e: MessageEvent) => void) | null; name: string };
+  const open = (h: Harness, name: string) =>
+    new ((h.page as unknown as { BroadcastChannel: new (n: string) => Ch }).BroadcastChannel)(name);
+  const heard = (ch: Ch) => {
+    const got: unknown[] = [];
+    ch.onmessage = (e) => got.push(e.data);
+    return got;
+  };
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+
+  it('keeps two sessions on one origin from hearing each other', async () => {
+    const a = await boot({ broadcast: true });
+    a.commit('s_a');
+    const chA = open(a, 'okta-token');
+    const b = await boot({ broadcast: true });
+    b.commit('s_b');
+    const chB = open(b, 'okta-token');
+    const gotB = heard(chB);
+    chA.postMessage('token-for-a');
+    await settle();
+    expect(gotB).toEqual([]);
+    expect(chB.name).toBe('okta-token');
+    chA.close();
+    chB.close();
+  });
+
+  it('still syncs tabs of the same session', async () => {
+    const a = await boot({ broadcast: true });
+    a.commit('s_a');
+    const one = open(a, 'sync');
+    const b = await boot({ broadcast: true });
+    b.commit('s_a');
+    const two = open(b, 'sync');
+    const got = heard(two);
+    one.postMessage({ signedOut: true });
+    await settle();
+    expect(got).toEqual([{ signedOut: true }]);
+    one.close();
+    two.close();
+  });
+
+  it('holds what a page posts before its session is known, then delivers it', async () => {
+    const a = await boot({ broadcast: true });
+    a.commit('s_a');
+    const listener = open(a, 'early');
+    const got = heard(listener);
+    const b = await boot({ broadcast: true, agent: true });
+    const early = open(b, 'early');
+    early.postMessage('queued');
+    b.commit('s_a');
+    await settle();
+    expect(got).toEqual(['queued']);
+    listener.close();
+    early.close();
   });
 });
