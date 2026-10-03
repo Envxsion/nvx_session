@@ -60,7 +60,9 @@ export type ParseFailure =
   | 'secure-prefix'
   | 'host-prefix'
   | 'too-large'
-  | 'none-requires-secure';
+  | 'none-requires-secure'
+  | 'secure-from-insecure'
+  | 'partitioned-requires-secure';
 
 export type ParseResult =
   | { ok: true; cookie: Cookie }
@@ -106,7 +108,10 @@ export function parseSetCookie(
   if (eq <= 0) return { ok: false, reason: 'no-name', detail: pair };
 
   const name = pair.slice(0, eq).trim();
-  const value = stripQuotes(pair.slice(eq + 1).trim());
+  // Kept exactly as sent, quotes included. Chrome stores a quoted value with
+  // its quotes and sends it back that way; stripping them broke Django's signed
+  // messages cookie, whose quoted form is part of what the signature covers.
+  const value = pair.slice(eq + 1).trim();
   if (!name) return { ok: false, reason: 'no-name' };
 
   // The jar's contents are concatenated straight into a Cookie header. A
@@ -128,13 +133,19 @@ export function parseSetCookie(
     const candidate = canonicalHost(attrs.domain.replace(/^\./, ''));
     if (!candidate) return { ok: false, reason: 'domain-mismatch', detail: attrs.domain };
     if (opts.isPublicSuffix(candidate)) {
-      return { ok: false, reason: 'public-suffix', detail: candidate };
+      // A public suffix that is the request's own host (a site served at a
+      // suffix, such as a github.io user page) is taken as host-only, as the
+      // browser does; any other public suffix is refused.
+      if (candidate !== requestHost) {
+        return { ok: false, reason: 'public-suffix', detail: candidate };
+      }
+    } else {
+      if (!domainMatches(requestHost, candidate)) {
+        return { ok: false, reason: 'domain-mismatch', detail: `${requestHost} vs ${candidate}` };
+      }
+      domain = candidate;
+      hostOnly = false;
     }
-    if (!domainMatches(requestHost, candidate)) {
-      return { ok: false, reason: 'domain-mismatch', detail: `${requestHost} vs ${candidate}` };
-    }
-    domain = candidate;
-    hostOnly = false;
   }
 
   const path = attrs.path && attrs.path.startsWith('/') ? attrs.path : defaultPath(ctx.url);
@@ -147,6 +158,14 @@ export function parseSetCookie(
 
   if (sameSite === 'none' && !secure) {
     return { ok: false, reason: 'none-requires-secure' };
+  }
+  // The browser refuses a Secure cookie set from a page that is not secure, and
+  // a Partitioned one that is not Secure.
+  if (secure && !secureContext) {
+    return { ok: false, reason: 'secure-from-insecure' };
+  }
+  if (attrs.partitioned && !secure) {
+    return { ok: false, reason: 'partitioned-requires-secure' };
   }
 
   // Prefixes are enforced by the browser, so they must be enforced here too.
@@ -283,10 +302,6 @@ export function hasIllegalOctet(s: string): boolean {
   return false;
 }
 
-function stripQuotes(v: string): string {
-  return v.length >= 2 && v.startsWith('"') && v.endsWith('"') ? v.slice(1, -1) : v;
-}
-
 export function canonicalHost(host: string): string {
   return host.trim().toLowerCase().replace(/\.$/, '');
 }
@@ -353,6 +368,13 @@ export function isExpired(c: Cookie, now: number): boolean {
 }
 
 /** The key that makes a cookie unique within a jar. */
-export function cookieKey(c: Pick<Cookie, 'domain' | 'path' | 'name'>): string {
-  return `${c.domain} ${c.path} ${c.name}`;
+/**
+ * The identity of a cookie in the jar, as the browser keys it: name, path, and
+ * domain, where a domain cookie is distinct from a host-only one of the same
+ * name (the browser writes the former with a leading dot). Without that, a
+ * `Domain=` cookie and a host-only one overwrote each other, and deleting one
+ * deleted both. NUL separated, since no part may contain one.
+ */
+export function cookieKey(c: Pick<Cookie, 'domain' | 'path' | 'name' | 'hostOnly'>): string {
+  return `${c.hostOnly ? '' : '.'}${c.domain}\u0000${c.path}\u0000${c.name}`;
 }

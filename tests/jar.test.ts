@@ -141,8 +141,38 @@ describe('parseSetCookie', () => {
     expect(parse(`a=${'x'.repeat(4200)}`)).toMatchObject({ ok: false, reason: 'too-large' });
   });
 
-  it('unquotes a quoted value', () => {
-    expect(must('a="hello"').value).toBe('hello');
+  it('refuses a Secure cookie set over plain http, as the browser does', () => {
+    const r = parse('s=1; Secure', 'http://nas.lan/');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('secure-from-insecure');
+  });
+
+  it('refuses Partitioned without Secure', () => {
+    const r = parse('p=1; Partitioned');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('partitioned-requires-secure');
+  });
+
+  it('takes Domain= equal to a public-suffix host as host-only', () => {
+    const c = must('u=1; Domain=github.io', 'https://github.io/');
+    expect(c.hostOnly).toBe(true);
+    expect(c.domain).toBe('github.io');
+    // Any other public suffix is still refused.
+    expect(parse('u=1; Domain=github.io', 'https://me.github.io/').ok).toBe(false);
+  });
+
+  it('keeps a host-only and a Domain= cookie of the same name apart', () => {
+    const store = new CookieStore();
+    store.upsert(must('sid=HOST; Path=/'));
+    store.upsert(must('sid=DOMAIN; Domain=vercel.com; Path=/'));
+    expect(store.all().map((c) => c.value).sort()).toEqual(['DOMAIN', 'HOST']);
+  });
+
+  // Chrome keeps the quotes and sends them back, and RFC 6265's cookie-value
+  // includes them. Django's signed messages cookie fails its check without them.
+  it('keeps a quoted value exactly as sent', () => {
+    expect(must('a="hello"').value).toBe('"hello"');
+    expect(must('messages="abc\\054def:sig"').value).toBe('"abc\\054def:sig"');
   });
 });
 
