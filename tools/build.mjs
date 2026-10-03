@@ -208,7 +208,9 @@ if (firefox) {
       // in to anonymous telemetry, which is technical and interaction data.
       data_collection_permissions: {
         required: ['none'],
-        optional: ['technicalAndInteraction'],
+        // Usage counts (opt-in telemetry); an email and site names only if the
+        // user types or ticks them into a problem report.
+        optional: ['technicalAndInteraction', 'personallyIdentifyingInfo', 'browsingActivity'],
       },
     },
   };
