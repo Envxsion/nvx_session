@@ -47,7 +47,11 @@ export type ActivateResult =
   /** Reached the server but it refused for a reason the user cannot fix here. */
   | { ok: false; reason: 'rejected' }
   /** Could not reach the server. Activation needs the network exactly once. */
-  | { ok: false; reason: 'network' };
+  | { ok: false; reason: 'network' }
+  /** The server's rate limit. Nothing is wrong with the key; try again shortly. */
+  | { ok: false; reason: 'rate' }
+  /** Moved between devices more often than the licence allows; support can move it. */
+  | { ok: false; reason: 'transfer_limit' };
 
 /** A parsed HTTP reply: the status and the decoded JSON body, or null body. */
 export interface HttpReply {
@@ -66,6 +70,13 @@ export interface LicensePorts {
   now: () => number;
   /** A fresh random id, e.g. crypto.randomUUID. */
   newId: () => string;
+  /**
+   * A salted digest of coarse traits of the computer, so the server can count
+   * two browsers on one machine as one device. Keyed by the licence key, so it
+   * is a different value for every licence and useless for tracking. Optional:
+   * without it every browser is its own device.
+   */
+  machineHint?: (key: string) => Promise<string | null>;
   /**
    * Hands the current token (or null when there is none) to the entitlement
    * gate. The one line that connects this module to what features are unlocked.

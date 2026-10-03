@@ -54,6 +54,10 @@ export class License {
   }
 
   async remove(): Promise<void> {}
+
+  async pack(): Promise<string | null> {
+    return null;
+  }
 }
 
 /** Inert sync client. Enabled never, syncs nothing, stores no passphrase. */

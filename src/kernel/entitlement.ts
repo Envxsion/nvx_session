@@ -158,7 +158,7 @@ export function b64urlToString(s: string): string | null {
 }
 
 /** ASCII bytes of a string, for the signed `header.payload` region. */
-function ascii(s: string): Uint8Array {
+export function ascii(s: string): Uint8Array {
   const out = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xff;
   return out;
@@ -251,7 +251,9 @@ export async function decideFromToken(
   }
   if (!ok) return { ...FREE, reason: 'bad_token' };
 
-  const nowS = Math.floor(ports.now() / 1000);
+  // Never earlier than the token's own issue time: a token cannot have been
+  // issued in the future, so a clock behind it has been wound back.
+  const nowS = Math.max(Math.floor(ports.now() / 1000), claims.iat);
   if (claims.exp + SKEW_S < nowS) return { ...FREE, reason: 'expired', claims };
 
   // The hard device binding. A token minted for another install unlocks nothing
@@ -299,6 +301,23 @@ export class Entitlement {
     if (this.ports.onChange && !sameDecision(prev, this.decision)) {
       this.ports.onChange(this.decision);
     }
+    return this.decision;
+  }
+
+  /**
+   * ------------------------------------------------------------------
+   *  Purpose  |  Re-decide the held token against the current time.
+   *  Why      |  A decision is made when a token arrives, so a token
+   *           |  that expired while the worker stayed up (offline, no
+   *           |  refresh) kept unlocking until the next restart. Called
+   *           |  on the worker's regular beat.
+   * ------------------------------------------------------------------
+   */
+  async recheck(): Promise<Decision> {
+    if (!this.lastToken) return this.decision;
+    const prev = this.decision;
+    this.decision = await decideFromToken(this.lastToken, this.ports);
+    if (this.ports.onChange && !sameDecision(prev, this.decision)) this.ports.onChange(this.decision);
     return this.decision;
   }
 
