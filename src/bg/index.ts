@@ -14,6 +14,12 @@
  */
 
 import { Engine } from '../kernel/engine.js';
+import { BUILD } from '../build-config.js';
+import { mintStamp } from '../kernel/stamp.js';
+import { TrustedClock } from '../kernel/clock.js';
+import { openPack, type PackData, type PackPorts } from '../kernel/pack.js';
+import { requestStripHeaders, responseStripHeaders, setPackExtras } from '../netfilter/compile.js';
+import { buildReport, cleanInput, diagnostics, reportText, type ReportFacts } from './report.js';
 import {
   DEFAULT_SETTINGS,
   Persistence,
@@ -22,7 +28,7 @@ import {
   type Settings,
 } from '../kernel/persist.js';
 import { Ephemeral, type EphemeralArea } from '../kernel/ephemeral.js';
-import { Telemetry, bucket as bucketCount, daysBucket, type TelemetryError } from '../kernel/telemetry.js';
+import { Telemetry, uuidV4, type DailyCounter, type TelemetryChannel, type TelemetryError } from '../kernel/telemetry.js';
 import { Entitlement, FEATURES, type Feature } from '../kernel/entitlement.js';
 // License and Sync come through the Pro gate: the committed default is an inert
 // free stub, and a Pro build swaps in the real classes from the private
@@ -57,7 +63,7 @@ import { namespaceFor } from '../store/keys.js';
 import { identityAcross, identityFrom } from '../kernel/identity.js';
 import { hostOf } from '../kernel/registry.js';
 import { registrableDomain } from '../jar/psl.js';
-import { MAX_ICON_CANDIDATES, rankIcons, type IconCandidate } from '../paint/badge.js';
+import { HUES, MAX_ICON_CANDIDATES, rankIcons, type IconCandidate } from '../paint/badge.js';
 import { Painter } from '../paint/render.js';
 import { applyGroups, browserGroupApi, planGroups } from '../paint/groups.js';
 import {
@@ -71,15 +77,10 @@ import {
   type AdoptionCandidate,
 } from '../kernel/adopt.js';
 import { IDENTITY_PROVIDERS, RULE_ID_BASE, RULES_PER_SESSION } from '../netfilter/compile.js';
-import {
-  blockingIsReal,
-  BlockingNetfilter,
-  browserBlockingApi,
-  type Owner,
-} from '../netfilter/blocking.js';
+import { blockingIsReal, BlockingNetfilter, browserBlockingApi, type Owner, extraHeaders } from '../netfilter/blocking.js';
 import type { Netfilter } from '../netfilter/types.js';
 import { browserDebuggerApi, ExactInterceptor } from '../netfilter/exact.js';
-import { actionApi, badgeApi, canScopeAgent, injectAgent } from '../platform.js';
+import { actionApi, badgeApi, canScopeAgent, initiatorOf, injectAgent, portableScripts } from '../platform.js';
 import { NativeHost } from '../native/client.js';
 import { cleanDanger, decide, DEFAULT_DANGER, type Danger } from '../guard/policy.js';
 import { Guard, UNLOCK_MS } from '../guard/guard.js';
@@ -121,6 +122,29 @@ const painter = new Painter();
 
 /**
  * ------------------------------------------------------------------
+ *  Purpose  |  Which audience an install belongs to: the store, or a
+ *           |  developer's unpacked build.
+ *  How      |  The dev tier says so at build time. An unpacked load of
+ *           |  any tier says so through management.getSelf, which needs
+ *           |  no permission. Sent as a tag, so dev rows can be filtered
+ *           |  out rather than lost.
+ * ------------------------------------------------------------------
+ */
+let telemetryChannel: TelemetryChannel = BUILD.tier === 'dev' ? 'dev' : 'store';
+try {
+  const mgmt = (chrome as { management?: { getSelf?: () => Promise<{ installType?: string }> } }).management;
+  void mgmt
+    ?.getSelf?.()
+    ?.then((self) => {
+      if (self?.installType === 'development') telemetryChannel = 'dev';
+    })
+    .catch(() => undefined);
+} catch {
+  /* absent on this platform; the build tier stands */
+}
+
+/**
+ * ------------------------------------------------------------------
  *  Purpose  |  Anonymous usage counts, off unless consented and given an
  *           |  endpoint.
  *  Note     |  The endpoint is a public ingest URL from a manifest field
@@ -132,32 +156,83 @@ const telemetry = new Telemetry(
   {
     storage,
     endpoint: () => {
-      const field = (chrome.runtime.getManifest() as { nvx_telemetry?: { endpoint?: unknown } })
-        .nvx_telemetry;
-      const url = field?.endpoint;
+      const url = BUILD.telemetryEndpoint;
       return typeof url === 'string' && /^https:\/\//.test(url) ? url : null;
     },
     consented: () => settings.telemetry,
     post: async (url, body) => {
+      const stamp = await telemetryStamp(body);
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...(stamp ? { 'x-nvx-stamp': stamp } : {}) },
         body,
         keepalive: true,
       });
-      if (!res.ok) throw new Error(`telemetry endpoint ${res.status}`);
+      return res.status;
     },
     now: () => Date.now(),
-    newId: () =>
-      typeof crypto?.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+    // Always a UUID v4, which is the only id shape the server accepts.
+    newId: () => (typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : uuidV4()),
+    channel: () => telemetryChannel,
   },
   {
     version: chrome.runtime.getManifest().version,
     mv: chrome.runtime.getManifest().manifest_version === 2 ? 2 : 3,
   }
 );
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Today's work stamp for this install's telemetry.
+ *  How      |  Minted once per install per UTC day and kept in memory
+ *           |  and session storage, so a worker restart does not pay
+ *           |  for it again. See kernel/stamp.ts for why.
+ * ------------------------------------------------------------------
+ */
+let stampHeld: { key: string; stamp: string } | null = null;
+let stampMinting: Promise<string | null> | null = null;
+async function telemetryStamp(body: string): Promise<string | null> {
+  let id = '';
+  try {
+    id = String((JSON.parse(body) as { batch?: { id?: unknown }[] }).batch?.[0]?.id ?? '');
+  } catch {
+    return null;
+  }
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `${id}/${day}`;
+  if (stampHeld?.key === key) return stampHeld.stamp;
+  const got: Record<string, unknown> = (await sessionArea?.get('nvx.stamp').catch(() => null)) ?? {};
+  const saved = got['nvx.stamp'] as { key: string; stamp: string } | undefined;
+  if (saved?.key === key) {
+    stampHeld = saved;
+    return saved.stamp;
+  }
+  stampMinting ??= mintStamp('telemetry', id, Date.now()).finally(() => (stampMinting = null));
+  const stamp = await stampMinting;
+  if (stamp) {
+    stampHeld = { key, stamp };
+    await sessionArea?.set({ 'nvx.stamp': stampHeld }).catch(() => undefined);
+  }
+  return stamp;
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Count what escaped every handler.
+ *  Note     |  Only where it was caught and the error's constructor
+ *           |  name go out, once a day each; the message and stack can
+ *           |  carry a URL, so neither is read.
+ * ------------------------------------------------------------------
+ */
+try {
+  self.addEventListener('error', (e: ErrorEvent) => telemetry.exception('uncaught', e?.error));
+  self.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) =>
+    telemetry.exception('rejection', e?.reason)
+  );
+} catch {
+  /* no global to listen on */
+}
 
 /**
  * ------------------------------------------------------------------
@@ -170,13 +245,10 @@ const telemetry = new Telemetry(
  * ------------------------------------------------------------------
  */
 function buildTier(): 'free' | 'pro' {
-  return (chrome.runtime.getManifest() as { nvx_tier?: unknown }).nvx_tier === 'pro' ? 'pro' : 'free';
+  return BUILD.tier === 'pro' ? 'pro' : 'free';
 }
 function manifestLicense(): { endpoint?: unknown; keys?: unknown } {
-  return (
-    (chrome.runtime.getManifest() as { nvx_license?: { endpoint?: unknown; keys?: unknown } })
-      .nvx_license ?? {}
-  );
+  return BUILD.license ?? {};
 }
 /** Whether this build can activate a licence at all: pro tier with an endpoint. */
 function licensePossible(): boolean {
@@ -200,35 +272,92 @@ function deviceLabelText(): string {
   return `${cachedOsLabel || 'Device'}, ${b}`;
 }
 
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  A hint that two browsers are on the same computer, so a
+ *           |  licence counts them as one device.
+ *  How      |  Coarse traits every Chromium browser on a machine shares
+ *           |  (OS and version, CPU architecture and cores, memory
+ *           |  class, GPU, time zone), hashed together with the licence
+ *           |  key. The key in the hash makes it a different value for
+ *           |  every licence, so it cannot follow anybody anywhere.
+ *  Why      |  An extension cannot read a hardware id, and that is a
+ *           |  good thing. Nothing here is a lock: the server only ever
+ *           |  uses a matching hint to be generous (one seat instead of
+ *           |  two), never to refuse, so a spoofed or changed hint costs
+ *           |  at most a seat and gains at most what the server caps.
+ * ------------------------------------------------------------------
+ */
+async function machineHint(key: string): Promise<string | null> {
+  const nav = globalThis.navigator as Navigator & {
+    deviceMemory?: number;
+    userAgentData?: { getHighEntropyValues?: (h: string[]) => Promise<Record<string, unknown>> };
+  };
+  const hi = await nav.userAgentData
+    ?.getHighEntropyValues?.(['platform', 'platformVersion', 'architecture', 'bitness'])
+    .catch(() => null);
+  if (!hi) return null;
+  let gpu = '';
+  try {
+    const gl = new OffscreenCanvas(1, 1).getContext('webgl') as WebGLRenderingContext | null;
+    gpu = String(gl?.getParameter(gl.RENDERER) ?? '');
+  } catch {
+    /* no WebGL in this worker: the hint is just coarser */
+  }
+  const traits = [
+    hi.platform,
+    // Major version only: a point update to the OS should not split a machine.
+    String(hi.platformVersion ?? '').split('.')[0],
+    hi.architecture,
+    hi.bitness,
+    nav.hardwareConcurrency ?? '',
+    nav.deviceMemory ?? '',
+    gpu.replace(/\s*\(0x[0-9a-f]+\)/gi, '').replace(/,\s*D3D\d+.*$/i, ''),
+    Intl.DateTimeFormat().resolvedOptions().timeZone ?? '',
+  ].join('|');
+  const canon = key.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const bytes = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`nvx-machine-v1|${canon}|${traits}`))
+  );
+  let b64 = '';
+  for (const b of bytes) b64 += String.fromCharCode(b);
+  return btoa(b64).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '').slice(0, 32);
+}
+
 // eslint-disable-next-line prefer-const -- assigned just below; entitlement's
 // deviceId port reads it, so it has to be referenceable before license exists.
 let license: License;
+/** The licence signing keys this build trusts, for tokens and site packs alike. */
+const LICENSE_KIDS: Record<string, string> = (() => {
+  const raw = manifestLicense().keys;
+  const out: Record<string, string> = {};
+  if (raw && typeof raw === 'object') {
+    for (const [kid, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v === 'string') out[kid] = v;
+    }
+  }
+  return out;
+})();
+async function verifySigned(pub: Uint8Array, sig: Uint8Array, data: Uint8Array): Promise<boolean> {
+  try {
+    const key = await crypto.subtle.importKey('raw', pub as BufferSource, { name: 'Ed25519' }, false, [
+      'verify',
+    ]);
+    return await crypto.subtle.verify('Ed25519', key, sig as BufferSource, data as BufferSource);
+  } catch {
+    // An engine without Ed25519 in WebCrypto cannot verify, so the token
+    // unlocks nothing and the user stays on the free product. Safe degradation.
+    return false;
+  }
+}
+/** Licence expiry and packs are measured on this, so setting the date back does nothing. */
+const clock = new TrustedClock(storage);
 const entitlement = new Entitlement({
   buildTier,
   deviceId: () => (license ? license.deviceId() : null),
-  kids: (() => {
-    const raw = manifestLicense().keys;
-    const out: Record<string, string> = {};
-    if (raw && typeof raw === 'object') {
-      for (const [kid, v] of Object.entries(raw as Record<string, unknown>)) {
-        if (typeof v === 'string') out[kid] = v;
-      }
-    }
-    return out;
-  })(),
-  verify: async (pub, sig, data) => {
-    try {
-      const key = await crypto.subtle.importKey('raw', pub as BufferSource, { name: 'Ed25519' }, false, [
-        'verify',
-      ]);
-      return await crypto.subtle.verify('Ed25519', key, sig as BufferSource, data as BufferSource);
-    } catch {
-      // An engine without Ed25519 in WebCrypto cannot verify, so the token
-      // unlocks nothing and the user stays on the free product. Safe degradation.
-      return false;
-    }
-  },
-  now: () => Date.now(),
+  kids: LICENSE_KIDS,
+  verify: verifySigned,
+  now: () => clock.now(),
   // Every licence edge case (activated, expired, revoked, paused, seat moved
   // away) lands here as a decision change, and re-applies the feature effects so
   // a Pro capability turns on and off mid-session without a reload. See
@@ -247,10 +376,13 @@ license = new License({
       headers: { 'content-type': 'application/json' },
       body,
     });
+    // Our own server's time, over https: the floor the trusted clock keeps.
+    clock.observe(Date.parse(res.headers.get('date') ?? ''));
     const json = await res.json().catch(() => null);
     return { status: res.status, json };
   },
   deviceLabel: () => deviceLabelText(),
+  machineHint: (key) => machineHint(key),
   now: () => Date.now(),
   newId: () =>
     typeof crypto?.randomUUID === 'function'
@@ -307,7 +439,64 @@ const sync = new Sync({
  *           |  storage handshake.
  * ------------------------------------------------------------------
  */
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Hold, apply and refresh the Pro site pack.
+ *  How      |  Stored as the signed token and re-verified on every
+ *           |  apply, so a pack edited on disk is simply ignored.
+ *           |  Applied only while the licence unlocks Pro; a lapse
+ *           |  clears it back to the built-in knowledge. A pack with a
+ *           |  lower sequence than the one held is refused, so an old
+ *           |  pack cannot be replayed over a newer one.
+ * ------------------------------------------------------------------
+ */
+const PACK_KEY = 'nvx.pack';
+const PACK_DAY_KEY = 'nvx.pack.day';
+const NO_PACK: PackData = { idps: [], responseHeaders: [], requestHeaders: [] };
+const packPorts: PackPorts = {
+  kids: LICENSE_KIDS,
+  verify: verifySigned,
+  deviceId: () => (license ? license.deviceId() : null),
+  now: () => clock.now(),
+};
+let packApplied = JSON.stringify(NO_PACK);
+let packSeq = 0;
+async function applyStoredPack(): Promise<void> {
+  const held: Record<string, unknown> = await storage.get([PACK_KEY]).catch(() => ({}));
+  const token = held[PACK_KEY];
+  const opened = entitlement.isPro() && typeof token === 'string' ? await openPack(token, packPorts) : null;
+  const data = opened?.ok ? opened.claims.data : NO_PACK;
+  if (opened?.ok) packSeq = Math.max(packSeq, opened.claims.seq);
+  const key = JSON.stringify(data);
+  if (key === packApplied) return;
+  packApplied = key;
+  setPackExtras(data);
+  note('info', 'life', opened?.ok ? 'a site pack is in use' : 'the site pack was cleared', {
+    detail: opened?.ok ? `pack ${opened.claims.seq}, ${data.idps.length} extra providers` : opened?.reason ?? 'not Pro',
+  });
+  engine.markDirty(registry.listSessions().map((x) => x.id));
+  await engine.flush();
+}
+async function maybeFetchPack(): Promise<void> {
+  if (!entitlement.isPro() || !licensePossible()) return;
+  const day = new Date(clock.now()).toISOString().slice(0, 10);
+  const held: Record<string, unknown> = await storage.get([PACK_DAY_KEY]).catch(() => ({}));
+  if (held[PACK_DAY_KEY] === day) return;
+  const token = await license.pack();
+  if (!token) return;
+  const opened = await openPack(token, packPorts);
+  if (!opened.ok) {
+    note('warn', 'life', 'a site pack was refused', { detail: opened.reason });
+    return;
+  }
+  await storage.set({ [PACK_DAY_KEY]: day });
+  if (opened.claims.seq < packSeq) return;
+  await storage.set({ [PACK_KEY]: token });
+  await applyStoredPack();
+}
+
 function applyEntitlements(): void {
+  void applyStoredPack();
   // IndexedDB isolation: re-push the storage handshake so the shim picks up the
   // current gate. A same-session re-push is cheap and the shim updates its flag
   // even when the session id has not changed.
@@ -382,7 +571,7 @@ async function applyPostureChange(
  * ------------------------------------------------------------------
  */
 function devUnlock(): boolean {
-  return (chrome.runtime.getManifest() as { nvx_tier?: unknown }).nvx_tier === 'dev';
+  return BUILD.tier === 'dev';
 }
 function featureOn(feature: Feature): boolean {
   return devUnlock() || entitlement.entitled(feature);
@@ -429,7 +618,16 @@ const LICENSE_REFRESH_HOUR_KEY = 'nvx.license.refreshedHour';
 async function maybeRefreshLicense(): Promise<void> {
   if (!licensePossible() || !license.status().present) return;
   try {
-    const now = Date.now();
+    // A token that ran out while the worker stayed up stops here, not at the
+    // next restart.
+    await entitlement.recheck();
+    if (clock.rolledBack()) {
+      note('warn', 'life', 'the system clock is behind the last time NVX saw', {
+        detail: 'licence expiry is measured from the later time',
+      });
+    }
+    void maybeFetchPack();
+    const now = clock.now();
     const d = entitlement.current();
     const exp = d.claims ? d.claims.exp * 1000 : 0;
     // Near a billing boundary, or already lapsed, check hourly instead of daily,
@@ -454,11 +652,14 @@ async function maybeRefreshLicense(): Promise<void> {
 function licenseSnapshot(): {
   tier: ReturnType<Entitlement['tier']>;
   entitlements: Feature[];
+  version: string;
+  buildTier: string;
   license: {
     present: boolean;
     device: string | null;
     lapse: string | null;
     possible: boolean;
+    deviceLabel: string;
     buildPro: boolean;
     dev: boolean;
     reason: string | null;
@@ -474,11 +675,14 @@ function licenseSnapshot(): {
     // worker does. Otherwise the UI would lock what the worker has already
     // unlocked for local development.
     entitlements: FEATURES.filter((f) => featureOn(f)),
+    version: chrome.runtime.getManifest().version,
+    buildTier: BUILD.tier,
     license: {
       present: license.status().present,
       device: license.status().device,
       lapse: license.status().lapse,
       possible: licensePossible(),
+      deviceLabel: deviceLabelText(),
       buildPro: buildTier() === 'pro',
       dev: devUnlock(),
       reason: d.reason ?? null,
@@ -660,6 +864,23 @@ function ensureEnv(): Promise<void> {
 /** When this install first ran, and the last day it was seen active. */
 const INSTALLED_AT_KEY = 'nvx.telemetry.installedAt';
 const LAST_ACTIVE_KEY = 'nvx.telemetry.lastActive';
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Write the install clock if it is missing.
+ *  Note     |  The one telemetry key written without consent: a bare
+ *           |  local timestamp, never sent itself, so the days-since-
+ *           |  install cohort counts from install rather than opt-in.
+ * ------------------------------------------------------------------
+ */
+async function ensureInstalledAt(): Promise<void> {
+  try {
+    const held = await storage.get([INSTALLED_AT_KEY]);
+    if (typeof held[INSTALLED_AT_KEY] !== 'number') await storage.set({ [INSTALLED_AT_KEY]: Date.now() });
+  } catch {
+    /* the beat falls back to now */
+  }
+}
 /**
  * ------------------------------------------------------------------
  *  Purpose  |  Whether the install or update event has actually been sent
@@ -672,46 +893,50 @@ const LAST_ACTIVE_KEY = 'nvx.telemetry.lastActive';
 const INSTALL_REPORTED_KEY = 'nvx.telemetry.installReported';
 /** The high-water engagement reading accumulated since the last beat. */
 const USAGE_PEAK_KEY = 'nvx.telemetry.peak';
-/** Which anomaly categories have been sent today, so each goes at most once a day. */
+/** The pre-v3 anomaly day stamp. No longer written; still erased on opt-out. */
 const ANOMALY_KEY = 'nvx.telemetry.anomaly';
 
 /**
  * ------------------------------------------------------------------
- *  Purpose  |  Send an anomaly signal at most once per install per
- *           |  calendar day.
- *  How      |  The anomaly categories fire in bursts when something is
- *           |  wrong; the operator needs the daily rate per category, not
- *           |  the storm, so this dedupes on a stored day stamp.
- *  Note     |  The category is a closed enum with no host, count or
- *           |  value.
+ *  Purpose  |  Send an isolation signal or fault.
+ *  Note     |  Deduped to once per install per day inside the
+ *           |  telemetry module, which keeps the day marker with the
+ *           |  rest of the daily rollup. A no-op while telemetry is off.
  * ------------------------------------------------------------------
  */
-const anomalyToday = new Set<string>();
-async function anomaly(category: TelemetryError): Promise<void> {
-  if (!settings.telemetry) return;
-  const today = new Date().toISOString().slice(0, 10);
-  const key = `${today}:${category}`;
-  // A synchronous fast path, so a burst in one worker cannot race the store.
-  if (anomalyToday.has(key)) return;
-  anomalyToday.add(key);
-  try {
-    const held = await storage.get([ANOMALY_KEY]);
-    const rec = held[ANOMALY_KEY] as { day?: string; sent?: string[] } | undefined;
-    const sent = rec && rec.day === today ? new Set(rec.sent ?? []) : new Set<string>();
-    if (sent.has(category)) return;
-    sent.add(category);
-    await storage.set({ [ANOMALY_KEY]: { day: today, sent: [...sent] } });
-    telemetry.error(category);
-  } catch {
-    /* an unsent anomaly is not worth a thrown anything */
-  }
+function anomaly(category: TelemetryError): void {
+  telemetry.error(category);
 }
 
-/** Sessions and managed tabs right now: the raw counts the beat then buckets. */
-function usageNow(): { sessions: number; tabs: number } {
+/** Bump a daily counter. A no-op while telemetry is off. */
+function tally(key: DailyCounter, n = 1): void {
+  telemetry.count(key, n);
+}
+
+/** The most rules any session compiled to, or zero on the blocking backend. */
+function engineRules(): number {
+  return engine instanceof Engine ? engine.maxSessionRules : 0;
+}
+
+/** Sessions, managed tabs, burners and the busiest session right now: raw, bucketed by the beat. */
+function usageNow(): { sessions: number; tabs: number; burners: number; maxTabs: number } {
   const sessions = registry.listSessions().filter((s) => s.id !== ANON);
-  const tabs = sessions.reduce((n, s) => n + registry.tabsFor(s.id).length, 0);
-  return { sessions: sessions.length, tabs };
+  const counts = sessions.map((s) => registry.tabsFor(s.id).length);
+  const tabs = counts.reduce((n, c) => n + c, 0);
+  const burners = sessions.filter((s) => s.ephemeral).length;
+  return { sessions: sessions.length, tabs, burners, maxTabs: Math.max(0, ...counts) };
+}
+type UsagePeak = { sessions?: number; tabs?: number; burners?: number; maxTabs?: number; rules?: number };
+
+/** Fold a reading into a stored peak, field by field. */
+function peakOf(prev: UsagePeak, now: ReturnType<typeof usageNow>, rules: number): Required<UsagePeak> {
+  return {
+    sessions: Math.max(now.sessions, Number(prev.sessions) || 0),
+    tabs: Math.max(now.tabs, Number(prev.tabs) || 0),
+    burners: Math.max(now.burners, Number(prev.burners) || 0),
+    maxTabs: Math.max(now.maxTabs, Number(prev.maxTabs) || 0),
+    rules: Math.max(rules, Number(prev.rules) || 0),
+  };
 }
 
 /**
@@ -729,14 +954,10 @@ function recordUsage(): void {
   if (!settings.telemetry) return;
   void (async () => {
     try {
-      const now = usageNow();
       const held = await storage.get([USAGE_PEAK_KEY]);
-      const prev = (held[USAGE_PEAK_KEY] as { sessions?: number; tabs?: number } | undefined) ?? {};
-      const next = {
-        sessions: Math.max(now.sessions, Number(prev.sessions) || 0),
-        tabs: Math.max(now.tabs, Number(prev.tabs) || 0),
-      };
-      if (next.sessions !== prev.sessions || next.tabs !== prev.tabs) {
+      const prev = (held[USAGE_PEAK_KEY] as UsagePeak | undefined) ?? {};
+      const next = peakOf(prev, usageNow(), engineRules());
+      if ((Object.keys(next) as (keyof UsagePeak)[]).some((k) => next[k] !== prev[k])) {
         await storage.set({ [USAGE_PEAK_KEY]: next });
       }
     } catch {
@@ -779,20 +1000,28 @@ async function activeOnce(): Promise<void> {
     // reading now. The current reading is folded in too, so a beat is never
     // lower than the live state at the moment it fires.
     const now = usageNow();
-    const peak = (held[USAGE_PEAK_KEY] as { sessions?: number; tabs?: number } | undefined) ?? {};
-    const sessions = Math.max(now.sessions, Number(peak.sessions) || 0);
-    const tabs = Math.max(now.tabs, Number(peak.tabs) || 0);
+    const rules = engineRules();
+    const peak = peakOf((held[USAGE_PEAK_KEY] as UsagePeak | undefined) ?? {}, now, rules);
     await storage.set({
       [LAST_ACTIVE_KEY]: today,
       [INSTALLED_AT_KEY]: installedAt,
-      [USAGE_PEAK_KEY]: now,
+      [USAGE_PEAK_KEY]: peakOf({}, now, rules),
     });
     await ensureEnv();
     telemetry.active({
-      sessions: bucketCount(sessions),
-      tabs: bucketCount(tabs),
-      since_install: daysBucket((Date.now() - installedAt) / 86_400_000),
+      sessions: peak.sessions,
+      tabs: peak.tabs,
+      sinceInstallDays: (Date.now() - installedAt) / 86_400_000,
+      burners: peak.burners,
+      maxSessionTabs: peak.maxTabs,
+      maxSessionRules: peak.rules,
+      tier: entitlement.tier() === 'free' ? 'free' : 'pro',
+      posture: settings.posture,
+      askNewSites: settings.askNewSites === true,
+      quiet: settings.quiet.length,
     });
+    // The beat is also when the day's queue goes out, since there is no alarm.
+    void telemetry.flush();
   } catch {
     /* a missed heartbeat is not worth a thrown boot */
   }
@@ -917,7 +1146,18 @@ function declarativeEngine(): Engine {
         session,
         detail: `dropped ${domains.join(', ')}`,
       });
-      void anomaly('rule_overflow');
+      anomaly('rule_overflow');
+      tally('overflow_events');
+      tally('overflow_hosts', domains.length);
+      // Which sign-in providers lost their rule, mapped onto the fixed list
+      // inside telemetry; every other dropped host is counted as one "other".
+      const idps = new Set(domains.map((d) => registrableDomain(d)).filter((d) => IDENTITY_PROVIDERS.has(d)));
+      for (const d of idps) telemetry.idpIssue(d, 'overflow');
+      if (domains.some((d) => !IDENTITY_PROVIDERS.has(registrableDomain(d)))) telemetry.idpIssue('', 'overflow');
+    },
+    onFlushed: (ms, ok) => {
+      telemetry.timing('flush', ms);
+      if (!ok) anomaly('flush_failed');
     },
     /**
      * Both of these mean a managed tab has stopped being isolated, and neither
@@ -936,14 +1176,16 @@ function declarativeEngine(): Engine {
             .map((x) => `${x.rule.id}: ${x.error}`)
             .join(' | '),
         });
-        telemetry.error('apply_failed');
+        anomaly('apply_failed');
+        tally('apply_failed');
       }
       if (r.dropped.length) {
         note('error', 'rules', 'rules dropped past the browser ceiling', {
           session: r.sessions.join(', '),
           detail: `${r.dropped.length} of ${r.dropped.length + r.added} did not fit, so those hosts are not isolated`,
         });
-        telemetry.error('apply_failed');
+        anomaly('apply_failed');
+        tally('apply_failed');
       }
     },
   });
@@ -997,6 +1239,7 @@ function buildNetfilter(): Netfilter {
     },
     onError: (err, details) =>
       console.error('[nvx] the blocking rewrite threw, request went out unmodified', details.url, err),
+    stripRequest: () => requestStripHeaders(),
   });
   filter.install();
   console.info('[nvx] blocking backend active: no rule ceiling, no flush race');
@@ -1016,9 +1259,9 @@ let engine: Netfilter = buildNetfilter();
  *           |  assumption.
  * ------------------------------------------------------------------
  */
-const exactApi = browserDebuggerApi();
-const exact =
-  exactApi && !blockingIsReal()
+function makeExact() {
+  const exactApi = browserDebuggerApi();
+  return exactApi && !blockingIsReal()
     ? new ExactInterceptor(exactApi, ownerOf, {
         onError: (err, where) => console.error(`[nvx] exact ${where} failed`, err),
         onLost: (tabId, reason) => {
@@ -1033,6 +1276,16 @@ const exact =
         },
       })
     : null;
+}
+let exact = makeExact();
+// The Pro build asks for the debugger permission only when a feature needs it,
+// so the interceptor can only exist once that is granted.
+chrome.permissions?.onAdded?.addListener((p) => {
+  if (!exact && p.permissions?.includes('debugger')) {
+    exact = makeExact();
+    syncExact();
+  }
+});
 
 /** Domains a tab's session has an opinion about, for the interception scope. */
 function watchedDomains(sessionId: SessionId, url: string): string[] {
@@ -1922,6 +2175,8 @@ async function noteHop(tabId: number, url: string, definite = false): Promise<vo
       hopPending.delete(tabId);
       recarryDue.delete(tabId);
       note('warn', 'session', 'a sign-in kept bouncing, so NVX stopped retrying it', { tabId, host: domain });
+      tally('loop_suppressed');
+      telemetry.idpIssue(domain, 'replay_exhausted');
     }
     return;
   }
@@ -1953,6 +2208,8 @@ async function noteHop(tabId: number, url: string, definite = false): Promise<vo
       detail: `${here} navigations in ${LOOP_WINDOW_MS / 1000} seconds; the site stays managed because it signs people in`,
     });
     noteInTab(tabId, 'This sign-in kept bouncing. NVX stopped retrying', '#c4614a', domain);
+    tally('loop_idp_stopped');
+    telemetry.idpIssue(domain, 'loop_stopped');
     return;
   }
 
@@ -1979,7 +2236,8 @@ async function noteHop(tabId: number, url: string, definite = false): Promise<vo
       ? 'the browser reported too many redirects in a managed tab, so this site is no longer managed'
       : `${here} navigations to the same site in ${LOOP_WINDOW_MS / 1000} seconds, so this site is no longer managed`,
   });
-  void anomaly('signin_loop');
+  anomaly('signin_loop');
+  tally('loop_released');
 
   noteInTab(
     tabId,
@@ -2008,12 +2266,21 @@ async function routeUnboundTab(tabId: number, url: string, windowId?: number): P
   if (settings.paused) return;
   if (registry.binding(tabId) || held.has(tabId)) return;
 
+  // The browser's own new-tab page is never a site to ask about, even where it
+  // is served from the web (Edge loads ntp.msn.com, Chrome with a third-party
+  // search engine a google.com page). Asking held every new tab at the picker.
+  if (NEW_TAB_PAGES.test(url)) return;
   const domain = domainOf(url);
   if (!domain) return;
   // Released is permanent and profile wide, so it is checked before anything
   // that could claim the tab, including the reopen memory.
   if (isReleased(domain)) return;
   if (decided.get(tabId)?.has(domain)) return;
+  // Read now, before anything below waits: a fast page commits during those
+  // waits, and a site recorded as visited by its own navigation was never
+  // asked about.
+  const seenBefore = visitedSites.get(tabId)?.has(domain) ?? false;
+  const lastOn = lastSite.get(tabId);
 
   // A tab opened from another is that tab's business, and that answer comes
   // before any other. The created event usually binds it first, but it waits
@@ -2022,8 +2289,15 @@ async function routeUnboundTab(tabId: number, url: string, windowId?: number): P
   // the picker, and a link from one session opened in the other because a tab
   // of the other on that site had just been closed.
   const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const typed = await typedNavigation(tabId, url);
   if (registry.binding(tabId) || held.has(tabId)) return;
-  const source = navigationSource.get(tabId) ?? tab?.openerTabId;
+  // Chrome also gives a tab opened with Ctrl+T or the new-tab button the tab
+  // that was active as its opener, so closing it goes back there. That tab did
+  // not open anything. Only a navigation a page started (a link, a redirect,
+  // window.open, "open link in new tab") takes its opener's session; one the
+  // user started from the address bar, a bookmark or the new-tab page does not.
+  const source =
+    navigationSource.get(tabId) ?? (typed === true || newTabPage(tab) ? undefined : tab?.openerTabId);
   const openerSession = typeof source === 'number' ? registry.binding(source)?.sessionId : undefined;
   if (openerSession && openerSession !== ANON) {
     touched(
@@ -2071,10 +2345,30 @@ async function routeUnboundTab(tabId: number, url: string, windowId?: number): P
   }
 
   if (registry.sessionsCovering(domain).length < 2) {
+    // A site nobody has decided about yet, opened from a fresh tab: asked before
+    // it loads, which is the only moment the answer can still matter. Not a link
+    // followed inside a page, which would ask on every click, and not a tab that
+    // came from another one, which already has its answer in its opener.
+    // Opera hides search-results pages, and every request they start, from
+    // extensions (unless the user allows it), so a result clicked there shows
+    // no request at all. Its navigation is still reported, so the page the tab
+    // was last on stands in for the initiator.
+    const fromSearch = typed === null && !!lastOn && CHOOSING_PAGES.test(lastOn) && lastOn !== domain;
+    const userChose =
+      typed === true || fromSearch
+        ? !seenBefore && Date.now() - startedAt > 10_000
+        : typed === null && freshTab(tab, tabId);
+    if (settings.askNewSites && !settings.quiet.includes(domain) && userChose) {
+      note('info', 'tab', 'asked about a new site', { tabId, url });
+      tally('picker_shown_new');
+      await holdForChoice(tabId, url);
+      return;
+    }
     note('debug', 'tab', 'left unmanaged, no session covers it', { tabId, url });
     return;
   }
   note('info', 'tab', 'held at the picker, more than one session covers it', { tabId, url });
+  tally('picker_shown_multi');
   await holdForChoice(tabId, url);
 }
 
@@ -2153,6 +2447,109 @@ function leaveUnmanaged(tabId: number, url: string): void {
   set.add(domain);
   decided.set(tabId, set);
   ephemeral.schedule();
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether a navigation starts from a fresh tab.
+ *  How      |  The tab still shows what it had before the navigation:
+ *           |  the new-tab page, a blank page or nothing at all is a
+ *           |  fresh tab; a site is a page the user was already on.
+ *           |  A tab opened by another one is never fresh, since its
+ *           |  opener decides.
+ * ------------------------------------------------------------------
+ */
+const FRESH_PAGES = /^(?:$|about:blank|chrome:\/\/(?:newtab|new-tab-page)|chrome-search:\/\/|edge:\/\/newtab|opera:\/\/startpage|brave:\/\/newtab|vivaldi:\/\/newtab)/i;
+const NEW_TAB_PAGES =
+  /^(?:chrome:\/\/(?:newtab|new-tab-page)|chrome-search:\/\/|edge:\/\/newtab|opera:\/\/startpage|brave:\/\/newtab|vivaldi:\/\/newtab|https:\/\/www\.google\.[a-z.]+\/_\/chrome\/newtab|https:\/\/ntp\.msn\.(?:com|cn)\/edge\/ntp|about:(?:newtab|home))/i;
+function newTabPage(tab: chrome.tabs.Tab | null): boolean {
+  return !!tab && NEW_TAB_PAGES.test(tab.url ?? '');
+}
+function freshTab(tab: chrome.tabs.Tab | null, tabId: number): boolean {
+  if (!tab) return false;
+  if (navigationSource.has(tabId)) return false;
+  // Ctrl+T sets an opener too (see routeUnboundTab), so the new-tab page wins
+  // over it. A blank tab with an opener is a window.open not yet reported by
+  // onCreatedNavigationTarget, and belongs to its opener.
+  if (newTabPage(tab)) return true;
+  if (typeof tab.openerTabId === 'number') return false;
+  return FRESH_PAGES.test(tab.url ?? '');
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Whether the user started this navigation themselves.
+ *  How      |  The request for a top-level page carries an initiator
+ *           |  when a page started it (a link, a form, a redirect,
+ *           |  script, a link opened in a new tab) and none when the
+ *           |  browser did: the address bar, a bookmark, a new-tab-page
+ *           |  tile. That is recorded by onBeforeRequest, which fires a
+ *           |  moment after onBeforeNavigate, so this waits briefly for
+ *           |  it. True: the user's own. False: a page's. Null: no
+ *           |  request was seen in time, and the caller falls back to
+ *           |  what the tab was showing.
+ *  Why      |  The tab's own url and opener are not reliable for this:
+ *           |  Ctrl+T gives a tab an opener, and the reported url can
+ *           |  already be the destination by the time it is read.
+ * ------------------------------------------------------------------
+ */
+const navStarts = new Map<number, { url: string; user: boolean; at: number }>();
+/**
+ * Where people choose a site rather than land on one: search engines and
+ * answer engines. A result clicked there is the user picking a destination,
+ * exactly like typing it, so it is asked about; a link inside an ordinary page
+ * is that page's business and is not.
+ */
+const CHOOSING_PAGES =
+  /^(?:google\.[a-z.]{2,12}|bing\.com|duckduckgo\.com|yahoo\.(?:com|co\.jp)|search\.yahoo\.com|baidu\.com|yandex\.[a-z.]{2,8}|ya\.ru|ecosia\.org|brave\.com|startpage\.com|qwant\.com|kagi\.com|naver\.com|daum\.net|seznam\.cz|sogou\.com|so\.com|perplexity\.ai|chatgpt\.com|you\.com|presearch\.com|mojeek\.com)$/;
+function fromChoosingPage(initiator: string | undefined, url: string): boolean {
+  if (!initiator) return false;
+  const from = domainOf(initiator);
+  return !!from && CHOOSING_PAGES.test(from) && from !== domainOf(url);
+}
+/** Sites each tab has shown, so a reload or Back to one is not a new site. */
+const visitedSites = new Map<number, Set<string>>();
+/** The site each tab last committed, for the Opera search-page fallback above. */
+const lastSite = new Map<number, string>();
+/** When the browser started, so restored tabs loading at launch are not asked about. */
+let startedAt = 0;
+const BROWSER_INITIATORS = /^(?:chrome|chrome-search|chrome-untrusted|edge|brave|opera|vivaldi):/i;
+const sameDoc = (a: string, b: string) => a.split('#')[0] === b.split('#')[0];
+chrome.webRequest.onBeforeRequest.addListener(
+  (d) => {
+    if (d.tabId < 0) return undefined;
+    // Firefox reports originUrl, not initiator; initiatorOf reads either.
+    const initiator = initiatorOf(d as { initiator?: string; originUrl?: string });
+    navStarts.set(d.tabId, {
+      url: d.url,
+      user: !initiator || BROWSER_INITIATORS.test(initiator) || fromChoosingPage(initiator, d.url),
+      at: Date.now(),
+    });
+    return undefined;
+  },
+  { urls: ['http://*/*', 'https://*/*'], types: ['main_frame'] }
+);
+chrome.webNavigation.onCommitted.addListener((d) => {
+  if (d.frameId !== 0 || !/^https?:/i.test(d.url)) return;
+  const domain = domainOf(d.url);
+  if (!domain) return;
+  const seen = visitedSites.get(d.tabId) ?? new Set<string>();
+  seen.add(domain);
+  visitedSites.set(d.tabId, seen);
+  lastSite.set(d.tabId, domain);
+});
+chrome.tabs.onRemoved.addListener((tabId) => {
+  navStarts.delete(tabId);
+  visitedSites.delete(tabId);
+  lastSite.delete(tabId);
+});
+async function typedNavigation(tabId: number, url: string): Promise<boolean | null> {
+  for (let i = 0; i < 12; i++) {
+    const n = navStarts.get(tabId);
+    if (n && sameDoc(n.url, url) && Date.now() - n.at < 5_000) return n.user;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return null;
 }
 
 /** Replaces the navigation with the picker, so the site is never contacted. */
@@ -2361,6 +2758,11 @@ function repaintAll(): void {
 
 // ----------------------------------------------------------------- groups
 
+chrome.tabs.onAttached.addListener(() => scheduleRegroup());
+chrome.tabs.onUpdated.addListener((_id, change) => {
+  if (change.pinned !== undefined || change.groupId !== undefined) scheduleRegroup();
+});
+
 let groupTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
@@ -2382,7 +2784,40 @@ function scheduleRegroup(): void {
 async function regroup(): Promise<number> {
   const api = browserGroupApi();
   if (!api) return 0;
-  return applyGroups(api, planGroups(registry.listSessions(), registry.listBindings()));
+  // The window comes from the tab strip, not the binding: most bindings are
+  // made before the tab's window is known (onBeforeNavigate carries none), and
+  // a tab dragged to another window keeps its old one. Pinned tabs cannot be in
+  // a group, and one in the list made the browser refuse the whole session.
+  const tabs = await chrome.tabs.query({ windowType: 'normal' }).catch(() => [] as chrome.tabs.Tab[]);
+  const live = new Map<number, chrome.tabs.Tab>();
+  for (const t of tabs) if (typeof t.id === 'number' && !t.pinned) live.set(t.id, t);
+  const bindings = registry
+    .listBindings()
+    .filter((b) => b.sessionId !== ANON && live.has(b.tabId))
+    .map((b) => ({ ...b, windowId: live.get(b.tabId)!.windowId }));
+  const sessions = registry.listSessions().filter((s) => s.id !== ANON);
+  const applied = await applyGroups(api, planGroups(sessions, bindings));
+
+  // The browser drops a new tab into the group of the tab it opened beside, so
+  // a tab can sit in Work's group while belonging to Home or to no session at
+  // all. A group carrying a session's name is a claim about every tab in it.
+  if (typeof chrome.tabs.ungroup === 'function') {
+    const owner = new Map(bindings.map((b) => [b.tabId, b.sessionId]));
+    const byLabel = new Map(sessions.map((s) => [s.label, s.id]));
+    const stray: number[] = [];
+    for (const t of tabs) {
+      if (typeof t.id !== 'number' || (t.groupId ?? -1) < 0) continue;
+      const g = await chrome.tabGroups.get(t.groupId!).catch(() => null);
+      const claimed = g?.title ? byLabel.get(g.title) : undefined;
+      if (claimed && owner.get(t.id) !== claimed) stray.push(t.id);
+    }
+    if (stray.length) {
+      await chrome.tabs.ungroup(stray as [number, ...number[]]).catch(() => undefined);
+      // A stray that belongs to another session goes to that session's group.
+      if (stray.some((id) => owner.has(id))) await applyGroups(api, planGroups(sessions, bindings));
+    }
+  }
+  return applied;
 }
 
 /** Scheduled work re-reads the preference, which can change inside the delay. */
@@ -2401,9 +2836,9 @@ async function ungroupAll(): Promise<void> {
   const api = browserGroupApi();
   if (!api || typeof chrome.tabs.ungroup !== 'function') return;
   const labels = new Set(registry.listSessions().map((s) => s.label));
-  const windows = new Set(registry.listBindings().map((b) => b.windowId));
-  for (const windowId of windows) {
-    if (windowId < 0) continue;
+  // Every normal window, not the bindings' windows, which are often unknown.
+  const all = await chrome.windows.getAll({ windowTypes: ['normal'] }).catch(() => [] as chrome.windows.Window[]);
+  for (const windowId of all.map((w) => w.id).filter((id): id is number => typeof id === 'number')) {
     try {
       const groups = await api.query({ windowId });
       const ours = new Set(groups.filter((g) => labels.has(g.title ?? '')).map((g) => g.id));
@@ -2741,6 +3176,7 @@ chrome.runtime.onConnect.addListener((port) => {
   port.onMessage.addListener((msg) => {
     void (async () => {
       if (msg?.kind === 'settle') {
+        tally('settle_wait');
         await whenReady();
         await (engine.settle ? engine.settle() : engine.flush());
         try {
@@ -2918,8 +3354,29 @@ chrome.runtime.onConnect.addListener((port) => {
  * ------------------------------------------------------------------
  */
 function whenReady(): Promise<void> {
-  if (!ready) ready = boot();
+  if (!ready) ready = timedBoot();
   return ready;
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Boot, measured: how long it took, how often a worker
+ *           |  starts, and whether it failed.
+ *  Note     |  The result is passed through untouched, so a failed boot
+ *           |  still rejects for its callers exactly as before.
+ * ------------------------------------------------------------------
+ */
+function timedBoot(): Promise<void> {
+  const startedAt = Date.now();
+  const run = boot();
+  run.then(
+    () => {
+      tally('worker_boots');
+      telemetry.timing('boot', Date.now() - startedAt);
+    },
+    () => anomaly('boot_failed')
+  );
+  return run;
 }
 
 const AGENT_SCRIPT_ID = 'nvx-agent';
@@ -3217,7 +3674,7 @@ async function reallyRegisterAgent(): Promise<void> {
       });
     }
     if (!matches.length) return;
-    await chrome.scripting.registerContentScripts([
+    await chrome.scripting.registerContentScripts(portableScripts([
       {
         id: AGENT_SCRIPT_ID,
         js: ['src/content/agent.js'],
@@ -3279,7 +3736,7 @@ async function reallyRegisterAgent(): Promise<void> {
         matchOriginAsFallback: true,
         persistAcrossSessions: false,
       },
-    ]);
+    ]));
   } catch (e) {
     // The signature is cleared so the next attempt retries rather than
     // believing a registration that never landed.
@@ -3329,7 +3786,8 @@ async function boot(): Promise<void> {
     }
   } catch (e) {
     note('error', 'rules', 'could not clear stale rules', { detail: String(e) });
-    telemetry.error('apply_failed');
+    anomaly('apply_failed');
+    tally('apply_failed');
   }
 
   // Its jar is meant to be permanently empty and an older build let it fill up,
@@ -3428,6 +3886,9 @@ async function boot(): Promise<void> {
   // below see the real tier. Left until later, every worker restart booted as
   // free and the token's arrival then unmasked a Pro user's open tabs. It is a
   // storage read and one signature check; a failure still boots, as free.
+  // The clock floor first, so the token is judged against the latest real time
+  // this install has seen rather than whatever the system clock now says.
+  await clock.load();
   await license.init().catch(() => undefined);
   lastLivePosture = livePosture();
   await registerAgent();
@@ -3439,7 +3900,13 @@ async function boot(): Promise<void> {
   // the once-a-day active beat, which its own day stamp keeps to once per day
   // across the many times a worker wakes.
   recordUsage();
-  void telemetry.ready().then(() => maybeActive());
+  void ensureInstalledAt();
+  // No alarms permission, so boot is one of the moments the queue is sent:
+  // after the beat, so a new day's rollup goes in the same batch.
+  void telemetry
+    .ready()
+    .then(() => maybeActive())
+    .then(() => telemetry.flush());
   // The Pro licence, if any: load the stored token into the gate, cache the
   // coarse OS name for the device label, and refresh against the server at most
   // once a day. All no-ops on a free build. Deliberately not awaited into the
@@ -3466,7 +3933,78 @@ async function boot(): Promise<void> {
   persistence.schedule();
 }
 
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  The toolbar mark, in the colour of the session the tab is
+ *           |  in.
+ *  How      |  Per tab, so switching tabs switches the colour with no
+ *           |  event of ours: the browser keeps each tab's icon. Drawn
+ *           |  from the same three rings as the logo, on an
+ *           |  OffscreenCanvas, and only redrawn when a tab's colour
+ *           |  actually changed. An unmanaged tab gets the stock icon.
+ * ------------------------------------------------------------------
+ */
+const tinted = new Map<number, string>();
+const ICON_RINGS = [
+  { r: 14.5, gap: 66, turn: 0, o: 1 },
+  { r: 9.5, gap: 78, turn: 132, o: 0.68 },
+  { r: 4.5, gap: 96, turn: 262, o: 0.4 },
+];
+function ringIcon(size: number, color: string): ImageData | null {
+  if (typeof OffscreenCanvas !== 'function') return null;
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const k = size / 34;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = Math.max(2 * k, size <= 16 ? 1.6 : 1.4);
+  ctx.strokeStyle = color;
+  for (const ring of ICON_RINGS) {
+    const start = ((ring.turn + ring.gap / 2) * Math.PI) / 180;
+    const end = ((ring.turn + 360 - ring.gap / 2) * Math.PI) / 180;
+    ctx.globalAlpha = ring.o;
+    ctx.beginPath();
+    ctx.arc(17 * k, 17 * k, ring.r * k, start, end);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(17 * k, 17 * k, 1.8 * k, 0, Math.PI * 2);
+  ctx.fill();
+  return ctx.getImageData(0, 0, size, size);
+}
+function tintToolbar(): void {
+  // browserAction on manifest v2 (Firefox, Opera's v2 build), same setIcon.
+  const scope = chrome as unknown as { action?: typeof chrome.action; browserAction?: typeof chrome.action };
+  const api = scope.action ?? scope.browserAction;
+  if (!api?.setIcon) return;
+  const want = new Map<number, string>();
+  if (!settings.paused) {
+    for (const b of registry.listBindings()) {
+      if (b.sessionId === ANON) continue;
+      const s = registry.getSession(b.sessionId);
+      if (s) want.set(b.tabId, HUES[s.color] ?? (/^#[0-9a-f]{6}$/i.test(s.color) ? s.color : HUES.cyan!));
+    }
+  }
+  for (const [tabId, color] of want) {
+    if (tinted.get(tabId) === color) continue;
+    const s16 = ringIcon(16, color);
+    const s32 = ringIcon(32, color);
+    if (!s16 || !s32) return;
+    tinted.set(tabId, color);
+    void api.setIcon({ tabId, imageData: { 16: s16, 32: s32 } }).catch(() => tinted.delete(tabId));
+  }
+  for (const tabId of [...tinted.keys()]) {
+    if (want.has(tabId)) continue;
+    tinted.delete(tabId);
+    void api.setIcon({ tabId, path: { 16: 'icons/16.png', 32: 'icons/32.png' } }).catch(() => undefined);
+  }
+}
+chrome.tabs.onRemoved.addListener((tabId) => tinted.delete(tabId));
+
 function touched(mutation: { dirty: SessionId[]; needsReload: number[] }, immediate = false): void {
+  queueMicrotask(tintToolbar);
   if (mutation.dirty.length) {
     // Every change to who owns which tab passes through here, so it is the one
     // place the daily beat's engagement peak can watch without scattering calls.
@@ -3602,6 +4140,11 @@ function heldTarget(url: string, headers?: chrome.webRequest.HttpHeader[]): stri
 }
 function holdRedirect(tabId: number, from: string, to: string, status: number, method: string): void {
   heldRedirects.set(tabId, { from, to, ready: false, committed: false, at: Date.now() });
+  // The hops a hold causes are NVX's own, not the site looping, so they must
+  // not count toward the loop detector. Without this, a sign-in with several
+  // held hops in a row could be released as a loop it never was.
+  markRecovering(tabId, 6000);
+  tally('hold_redirect');
   if ((status === 307 || status === 308) && method.toUpperCase() !== 'GET') {
     note('warn', 'tab', 'a held redirect kept its method, which cannot be replayed, so it went on as a GET', { tabId, url: to });
   }
@@ -3614,6 +4157,10 @@ function releaseHeld(tabId: number, why: 'ready' | 'committed' | 'timeout'): voi
   if (why === 'committed') h.committed = true;
   if (why !== 'timeout' && !(h.ready && h.committed)) return;
   heldRedirects.delete(tabId);
+  // Covers the hop this release is about to cause.
+  markRecovering(tabId, 4000);
+  tally(why === 'ready' ? 'hold_ready' : why === 'committed' ? 'hold_committed' : 'hold_timeout');
+  if (why === 'timeout') telemetry.idpIssue(hostOf(h.to), 'hold_timeout');
   void (async () => {
     const done = await chrome.scripting
       .executeScript({
@@ -3851,6 +4398,115 @@ async function remask(tabId: number): Promise<void> {
   }
 }
 
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  What a problem report knows about this install.
+ *  Note     |  Counts and settings, never a cookie or a url. Session
+ *           |  names and site names are scrubbed by report.ts unless
+ *           |  the user asks for site names.
+ * ------------------------------------------------------------------
+ */
+let lastReportAt = 0;
+async function reportFacts(): Promise<ReportFacts> {
+  const bindings = registry.listBindings();
+  const sessions = registry
+    .listSessions()
+    .filter((s) => s.id !== ANON)
+    .map((s) => ({
+      label: s.label,
+      tabs: bindings.filter((b) => b.sessionId === s.id).length,
+      sites: s.store.domains().length,
+    }));
+  const ua = (globalThis.navigator?.userAgent ?? '') as string;
+  return {
+    version: chrome.runtime.getManifest().version,
+    tier: entitlement.tier(),
+    channel: telemetryChannel,
+    device: deviceLabelText(),
+    browserVersion: /(?:Chrome|Edg|OPR)\/(\d+)/.exec(ua)?.[0] ?? 'unknown',
+    settings: {
+      posture: settings.posture,
+      paused: settings.paused,
+      exact: settings.exact,
+      paint: settings.paint,
+      group: settings.group,
+      askNewSites: settings.askNewSites,
+      neverAsk: settings.quiet.length,
+      telemetry: settings.telemetry,
+      logLevel: settings.logLevel,
+    },
+    sessions,
+    managedTabs: bindings.filter((b) => b.sessionId !== ANON).length,
+    released: [...settings.released],
+    journal: await journal.all(),
+    now: Date.now(),
+  };
+}
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Let our own site hand a key straight to the extension.
+ *  How      |  externally_connectable lets only https://session.nvx.sh
+ *           |  and https://nvx.sh send here, and the sender's origin is
+ *           |  checked again regardless. Two messages: a ping (is NVX
+ *           |  installed, which version, is Pro on) and activate, which
+ *           |  runs the same activation as typing the key in the popup.
+ *  Why      |  After paying, or after a recovery email, the key arrives
+ *           |  on a page of ours. Copying it into a popup is the step
+ *           |  people get wrong or never finish.
+ *  Note     |  Nothing is readable from outside: no key, no token, no
+ *           |  device id, no session, no site. Activations from outside
+ *           |  are limited to five a minute.
+ * ------------------------------------------------------------------
+ */
+const SITE_ORIGINS = new Set(['https://session.nvx.sh', 'https://nvx.sh']);
+const externalActivations: number[] = [];
+chrome.runtime.onMessageExternal?.addListener((raw, sender, reply) => {
+  let origin = '';
+  try {
+    origin = sender.origin ?? new URL(sender.url ?? '').origin;
+  } catch {
+    origin = '';
+  }
+  if (!SITE_ORIGINS.has(origin)) return false;
+  const msg = (raw ?? {}) as { type?: unknown; key?: unknown; transfer?: unknown };
+  void (async () => {
+    await whenReady();
+    if (msg.type === 'nvx.ping') {
+      reply({
+        installed: true,
+        version: chrome.runtime.getManifest().version,
+        canActivate: licensePossible(),
+        pro: entitlement.tier() !== 'free',
+      });
+      return;
+    }
+    if (msg.type === 'nvx.activate' && typeof msg.key === 'string') {
+      if (!licensePossible()) {
+        reply({ ok: false, reason: 'free_build' });
+        return;
+      }
+      const now = Date.now();
+      while (externalActivations.length && now - externalActivations[0]! > 60_000) externalActivations.shift();
+      if (externalActivations.length >= 5) {
+        reply({ ok: false, reason: 'rate' });
+        return;
+      }
+      externalActivations.push(now);
+      const result = await license.activate(msg.key.slice(0, 64), { transfer: msg.transfer === true });
+      note(result.ok ? 'info' : 'warn', 'life', 'a licence key arrived from the NVX site', {
+        detail: result.ok ? 'activated' : result.reason,
+      });
+      // The seat list is what the page needs to offer the move; nothing else
+      // about the result leaves.
+      reply(result);
+      return;
+    }
+    reply({ ok: false, reason: 'unknown' });
+  })();
+  return true;
+});
+
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (details.frameId !== 0) return;
   void (async () => {
@@ -4023,8 +4679,7 @@ function warnInTab(tabId: number, entry: AuditEntry): void {
 
 // --------------------------------------------------------------- requests
 
-chrome.webRequest.onHeadersReceived.addListener(
-  (details) => {
+const onResponse = (details: chrome.webRequest.OnHeadersReceivedDetails): undefined => {
     void (async () => {
       await whenReady();
       // Only a managed tab's own responses. An unmanaged tab, or a worker, is
@@ -4055,8 +4710,15 @@ chrome.webRequest.onHeadersReceived.addListener(
       // it), so the session's pages learn about it from here instead.
       pushJar(session.id, result.cookies);
       if (binding) noteFreshCookies(details.tabId, result.cookies);
+      // Holding a redirect is a declarative rule's job (it takes the Location
+      // off); the blocking backend reads the jar as each hop leaves, so there
+      // is nothing to hold and the hop goes on by itself.
       const held =
-        binding && details.type === 'main_frame' && details.statusCode >= 300 && details.statusCode < 400
+        binding &&
+        engine instanceof Engine &&
+        details.type === 'main_frame' &&
+        details.statusCode >= 300 &&
+        details.statusCode < 400
           ? heldTarget(details.url, details.responseHeaders)
           : null;
       if (held) holdRedirect(details.tabId, details.url, held, details.statusCode, details.method);
@@ -4077,6 +4739,7 @@ chrome.webRequest.onHeadersReceived.addListener(
         const hosts = [hostOf(details.url), ...result.cookies.filter((c) => c.hostOnly).map((c) => c.domain)];
         if (held) hosts.push(hostOf(held));
         await engine.patch?.(session.id, hosts.filter(Boolean));
+        if (engine instanceof Engine) telemetry.patchRules(engine.patchRules);
         if (held) releaseHeld(details.tabId, 'ready');
       }
       if (details.type === 'main_frame' || details.type === 'sub_frame') {
@@ -4099,10 +4762,44 @@ chrome.webRequest.onHeadersReceived.addListener(
       }
     })();
     return undefined;
-  },
-  { urls: ['http://*/*', 'https://*/*'] },
-  ['responseHeaders', 'extraHeaders']
-);
+};
+
+/**
+ * ------------------------------------------------------------------
+ *  Purpose  |  Keep a managed tab's Set-Cookie (and the account
+ *           |  headers) out of the browser's own jar on manifest v2.
+ *  How      |  v3 does this with a declarative rule (compile.ts
+ *           |  setCookieRule). v2 has no rules, so a blocking listener
+ *           |  removes the same list, after handing the untouched
+ *           |  response to onResponse so the session still files the
+ *           |  cookies. One listener, so the order is not left to the
+ *           |  browser.
+ *  Why      |  Without it, every session's cookies also landed in the
+ *           |  profile jar on Firefox and Opera's v2 build, and an
+ *           |  unmanaged tab carried whichever account signed in last.
+ * ------------------------------------------------------------------
+ */
+if (blockingIsReal()) {
+  chrome.webRequest.onHeadersReceived.addListener(
+    (details) => {
+      onResponse(details);
+      if (settings.paused || details.tabId < 0) return undefined;
+      const binding = registry.binding(details.tabId);
+      if (!binding) return undefined;
+      const strip = new Set(responseStripHeaders());
+      const all = details.responseHeaders ?? [];
+      const kept = all.filter((h) => !strip.has(h.name.toLowerCase()));
+      return kept.length === all.length ? undefined : { responseHeaders: kept };
+    },
+    { urls: ['http://*/*', 'https://*/*'] },
+    ['blocking', 'responseHeaders', ...extraHeaders()]
+  );
+} else {
+  chrome.webRequest.onHeadersReceived.addListener(onResponse, { urls: ['http://*/*', 'https://*/*'] }, [
+    'responseHeaders',
+    ...extraHeaders(),
+  ]);
+}
 
 /**
  * ------------------------------------------------------------------
@@ -4212,11 +4909,20 @@ function checkRecarry(tabId: number, url: URL, sent: string): boolean {
 const hopReplays = new Map<number, number[]>();
 /** Until when a tab's hops are NVX's own replays rather than the site's. */
 const recovering = new Map<number, number>();
+/** Extend a tab's recovery window, never shorten it. */
+function markRecovering(tabId: number, ms: number): void {
+  const until = Date.now() + ms;
+  if ((recovering.get(tabId) ?? 0) < until) recovering.set(tabId, until);
+}
 function replayHop(tabId: number, url: string): void {
   const now = Date.now();
   const recent = (hopReplays.get(tabId) ?? []).filter((at) => now - at < 15_000);
-  if (recent.length >= 4) return;
+  if (recent.length >= 4) {
+    telemetry.idpIssue(hostOf(url), 'replay_exhausted');
+    return;
+  }
   hopReplays.set(tabId, [...recent, now]);
+  tally('replay_hop');
   recarryDue.delete(tabId);
   recovering.set(tabId, now + 6000);
   note('info', 'tab', 'asked again for a hop that left without a cookie it was just given', { tabId, url });
@@ -4265,8 +4971,12 @@ chrome.webNavigation.onCompleted.addListener((details) => {
   // more than one hop, and still bounded so a site that never accepts can only
   // cost a few loads. The loop detector watches the same tab regardless.
   const recent = (chainReplays.get(details.tabId) ?? []).filter((at) => now - at < 20_000);
-  if (recent.length >= 3) return;
+  if (recent.length >= 3) {
+    telemetry.idpIssue(hostOf(details.url), 'replay_exhausted');
+    return;
+  }
   chainReplays.set(details.tabId, [...recent, now]);
+  tally('replay_chain');
   lastRecarry.set(details.tabId, now);
   recovering.set(details.tabId, now + 8000);
   void (async () => {
@@ -4309,7 +5019,9 @@ chrome.webRequest.onSendHeaders.addListener(
       const context = contextFor({
         type: details.type,
         url: details.url,
-        ...(details.initiator ? { initiator: details.initiator } : {}),
+        ...(initiatorOf(details as { initiator?: string; originUrl?: string })
+          ? { initiator: initiatorOf(details as { initiator?: string; originUrl?: string }) }
+          : {}),
       });
       const expected = emit(session.store, url, context).header;
       const sent = details.requestHeaders?.find((h) => h.name.toLowerCase() === 'cookie')?.value;
@@ -4372,6 +5084,18 @@ chrome.webRequest.onSendHeaders.addListener(
       // A foreign cookie means the profile jar reached a managed tab, which is
       // the failure this whole design exists to prevent. Never silent.
       if (result.events.some((e) => e.kind === 'foreign')) {
+        // Transient when the rules simply had not landed yet: the tab's first
+        // load, a tab bound or moved moments ago, a sign-in NVX is replaying,
+        // or a rule write still in flight. Counted either way; only a real one
+        // raises the signal.
+        const sentAt = Date.now();
+        const transient =
+          firstLoad ||
+          sentAt - binding.boundAt < 5000 ||
+          sentAt < (recovering.get(details.tabId) ?? 0) ||
+          (engine instanceof Engine && engine.busy);
+        tally(transient ? 'foreign_transient' : 'foreign_real');
+        if (!transient) anomaly('foreign_cookie');
         note('error', 'jar', 'a request carried a cookie it should not have', {
           session: session.label,
           url: details.url,
@@ -4379,7 +5103,6 @@ chrome.webRequest.onSendHeaders.addListener(
           // foreign, missing or stale, is what makes the line worth reading.
           detail: result.events.map((e) => `${e.kind}: ${e.names.join(' ')}`).join('; '),
         });
-        void anomaly('foreign_cookie');
         engine.markDirty([session.id]);
         void engine.flush();
         paintAlarm();
@@ -4387,7 +5110,7 @@ chrome.webRequest.onSendHeaders.addListener(
     })();
   },
   { urls: ['http://*/*', 'https://*/*'] },
-  ['requestHeaders', 'extraHeaders']
+  ['requestHeaders', ...extraHeaders()]
 );
 
 // ------------------------------------------------------------------ alarm
@@ -5000,23 +5723,27 @@ chrome.runtime.onInstalled.addListener((details) => {
     // too), so make the id ready and the env known, then a single install or
     // update signal carrying the device profile.
     await telemetry.ready();
-    await ensureEnv();
     if (reason === 'install') {
       // The install clock, for the days-since-install cohort on the active beat.
+      // Written whatever the consent, because it is a local timestamp that never
+      // leaves on its own, and a cohort measured from opt-in would be wrong.
       // Set once and never overwritten, so an update does not reset the age.
-      const held = await storage.get([INSTALLED_AT_KEY]);
-      if (typeof held[INSTALLED_AT_KEY] !== 'number') {
-        await storage.set({ [INSTALLED_AT_KEY]: Date.now() });
-      }
-      telemetry.install('install');
+      await ensureInstalledAt();
+      telemetry.install();
       // Only counts as reported if consent was already on so the send could
       // actually leave. With consent off, the send was dropped and the marker
       // stays absent, so the first opt-in knows to send the install it missed.
       if (settings.telemetry) await storage.set({ [INSTALL_REPORTED_KEY]: Date.now() });
     } else if (reason === 'update') {
-      telemetry.install('update');
-      if (settings.telemetry) await storage.set({ [INSTALL_REPORTED_KEY]: Date.now() });
+      // An unpacked reload fires update with the same version; that is a
+      // developer pressing reload, not a release reaching anyone.
+      const from = details?.previousVersion ?? '';
+      if (from && from !== chrome.runtime.getManifest().version) {
+        telemetry.update(from);
+        if (settings.telemetry) await storage.set({ [INSTALL_REPORTED_KEY]: Date.now() });
+      }
     }
+    void telemetry.flush();
     /**
      * Nothing opens on its own at install.
      *
@@ -5049,12 +5776,13 @@ async function openWelcome(): Promise<void> {
   }
 }
 chrome.runtime.onStartup.addListener(() => {
+  startedAt = Date.now();
   void noteLifecycle('onStartup');
   void whenReady().then(async () => {
     await telemetry.ready();
-    await ensureEnv();
     telemetry.startup();
-    void maybeActive();
+    await maybeActive();
+    void telemetry.flush();
   });
   // Session rules die with the browser session, so a restart has to recompile
   // everything rather than trust what the registry remembers. Chained onto the
@@ -5284,12 +6012,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
           // toggle are pointless in a build with no endpoint, so the UI hides
           // them unless this is true. It says nothing about consent, only about
           // whether the machinery exists.
-          telemetryPossible: (() => {
-            const field = (
-              chrome.runtime.getManifest() as { nvx_telemetry?: { endpoint?: unknown } }
-            ).nvx_telemetry;
-            return typeof field?.endpoint === 'string' && /^https:\/\//.test(field.endpoint);
-          })(),
+          telemetryPossible:
+            typeof BUILD.telemetryEndpoint === 'string' && /^https:\/\//.test(BUILD.telemetryEndpoint),
           // The Pro tier, section 30. `tier` and `entitlements` drive which
           // features the settings screen shows as unlocked; `license` drives the
           // Enter-licence and device-seat UI; `sync` drives the sync panel. All
@@ -5381,6 +6105,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
        * sign-in you do not want lingering in any session afterwards.
        */
       case 'newBurner': {
+        tally('burner_created');
         const id: SessionId = `s_${Date.now().toString(36)}`;
         registry.createSession({
           id,
@@ -5593,9 +6318,25 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         const host = hostOf(typeof msg.url === 'string' ? msg.url : '');
         // Peeked, not taken. See the note on peekRemembered.
         const remembered = peekRemembered(typeof msg.url === 'string' ? msg.url : '');
+        const covering = chooserOptionsFor(host);
+        // A site no session has yet is a different question: which of your
+        // sessions should this be, so every session is offered, the ones that
+        // already know the site first.
+        const known = new Set(covering.map((o) => o.sessionId));
+        const others = covering.length >= 2
+          ? []
+          : registry
+              .listSessions()
+              .filter((s) => s.id !== ANON && !s.ephemeral && !known.has(s.id))
+              .sort((a, b) => b.lastSeen - a.lastSeen)
+              .map((s) => ({ sessionId: s.id, label: s.label, color: s.color, cookies: 0 }));
         reply({
           ok: true,
-          options: chooserOptionsFor(host).map((o) => ({
+          reason: covering.length >= 2 ? 'ambiguous' : 'new',
+          host,
+          domain: domainOf(`https://${host}/`) || host,
+          palette: [...RAMP],
+          options: [...covering, ...others].map((o) => ({
             ...o,
             lastUsed: o.sessionId === remembered,
           })),
@@ -5638,7 +6379,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
             // the user has to open the panel to identify, on the one surface
             // that exists so they never have to.
             label: cleanLabel(msg.label, domain || 'New session'),
-            color: nextColor(),
+            color: typeof msg.color === 'string' ? cleanColor(msg.color) : nextColor(),
             pinned: domain ? [domain] : [],
             store: new CookieStore(),
             family: [],
@@ -5649,6 +6390,24 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
             lastSeen: Date.now(),
           });
           void registerAgent();
+        }
+
+        // Remembered: the site goes into the chosen session, so a fresh tab on it
+        // opens there without asking, or onto the quiet list, so it is never
+        // asked about again. Only the question for two sessions on one site is
+        // asked every time, because that is the one with no right default.
+        if (msg.create === true) tally('pick_created');
+        else if (sessionId) tally('pick_chosen');
+        else tally('pick_unmanaged');
+        if (msg.remember === true && domain) {
+          const chosen = sessionId ? registry.getSession(sessionId) : undefined;
+          tally(chosen ? 'pick_remember' : 'pick_quiet');
+          if (chosen && !chosen.pinned.includes(domain)) {
+            chosen.pinned = [...chosen.pinned, domain].sort();
+            void registerAgent();
+          } else if (!chosen && !settings.quiet.includes(domain)) {
+            settings = { ...settings, quiet: [...settings.quiet, domain].sort() };
+          }
         }
 
         if (sessionId && registry.getSession(sessionId)) {
@@ -5710,6 +6469,8 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
           if (loopReport?.domain === domain) loopReport = null;
         } else {
           await releaseSite(domain, 'released by hand');
+          tally('release_manual');
+          telemetry.feature('release');
         }
         reply({ ok: true, released: settings.released });
         return;
@@ -5747,6 +6508,10 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
           // shown once and never returns.
           cautionAcked: before.cautionAcked || msg.cautionAcked === true,
           failClosed: typeof msg.failClosed === 'boolean' ? msg.failClosed : before.failClosed,
+          askNewSites: typeof msg.askNewSites === 'boolean' ? msg.askNewSites : before.askNewSites,
+          quiet: Array.isArray(msg.quiet)
+            ? [...new Set((msg.quiet as unknown[]).filter((d): d is string => typeof d === 'string' && d.length > 0 && d.length < 254))].sort()
+            : before.quiet,
           cacheIsolation:
             typeof msg.cacheIsolation === 'boolean' ? msg.cacheIsolation : before.cacheIsolation,
         };
@@ -5760,35 +6525,29 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         if (settings.telemetry !== before.telemetry) {
           if (settings.telemetry) {
             await telemetry.ready();
-            await ensureEnv();
-            // A pre-consent install has no install clock; start it now so the
-            // cohort is measured from first opt-in rather than not at all.
-            const held = await storage.get([INSTALLED_AT_KEY, INSTALL_REPORTED_KEY]);
-            if (typeof held[INSTALLED_AT_KEY] !== 'number') {
-              await storage.set({ [INSTALLED_AT_KEY]: Date.now() });
-            }
+            // The install clock is normally already there, written at install
+            // whatever the consent; this only covers an install from before
+            // that was true.
+            await ensureInstalledAt();
+            const held = await storage.get([INSTALL_REPORTED_KEY]);
             // The install that fired before consent was dropped and never
             // retried, so send it now, once. Without this no install is ever
             // recorded, since nobody can consent before installing.
             if (!held[INSTALL_REPORTED_KEY]) {
-              telemetry.install('install');
+              telemetry.install();
               await storage.set({ [INSTALL_REPORTED_KEY]: Date.now() });
             }
             recordUsage();
-            void maybeActive();
+            await maybeActive();
+            void telemetry.flush();
           } else {
             await telemetry.purge();
-            // The id is gone; the clock, the day stamp, the peak and the
-            // reported marker go with it, so turning it off leaves nothing
-            // durable behind.
-            await storage.remove([
-              INSTALLED_AT_KEY,
-              LAST_ACTIVE_KEY,
-              USAGE_PEAK_KEY,
-              INSTALL_REPORTED_KEY,
-              ANOMALY_KEY,
-            ]);
-            anomalyToday.clear();
+            // The id, the queue and the day's rollup are gone; the day stamp,
+            // the peak and the reported marker go with them. The install
+            // clock stays: it was written before consent, is never sent on its
+            // own, and is the local fact that makes the cohort right if the
+            // user opts in again.
+            await storage.remove([LAST_ACTIVE_KEY, USAGE_PEAK_KEY, INSTALL_REPORTED_KEY, ANOMALY_KEY]);
           }
         }
         /**
@@ -5875,6 +6634,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       case 'enterLicense': {
         const key = typeof msg.key === 'string' ? msg.key : '';
         const result = await license.activate(key, { transfer: msg.transfer === true });
+        if (result.ok) void maybeFetchPack();
         reply({ result, ...licenseSnapshot() });
         return;
       }
@@ -5890,6 +6650,55 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       }
 
       /**
+       * Problem reports from the Help view. The preview is the exact
+       * diagnostics block a send would carry, so what the user reads is what
+       * leaves. A send goes to the report endpoint with a work stamp; without
+       * an endpoint, or when it fails, the plain text comes back for the
+       * popup to copy, and nothing is lost.
+       */
+      case 'reportPreview': {
+        reply({ preview: diagnostics(await reportFacts(), msg.includeSites === true) });
+        return;
+      }
+      case 'sendReport': {
+        const input = cleanInput(msg as Record<string, unknown>);
+        if ('error' in input) {
+          reply({ ok: false, reason: 'rejected', error: input.error });
+          return;
+        }
+        const id = (typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : uuidV4()).slice(0, 8);
+        const report = buildReport(input, await reportFacts(), id);
+        const fallback = reportText(report);
+        const url = BUILD.reportEndpoint;
+        if (!url || !/^https:\/\//.test(url)) {
+          reply({ ok: false, reason: 'no_endpoint', fallback });
+          return;
+        }
+        if (Date.now() - lastReportAt < 60_000) {
+          reply({ ok: false, reason: 'rate', fallback });
+          return;
+        }
+        lastReportAt = Date.now();
+        try {
+          const stamp = await mintStamp('report', id, Date.now());
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...(stamp ? { 'x-nvx-stamp': stamp } : {}) },
+            body: JSON.stringify(report),
+          });
+          if (res.ok) {
+            note('info', 'life', 'a problem report was sent', { detail: id });
+            reply({ ok: true, id });
+            return;
+          }
+          reply({ ok: false, reason: res.status === 429 ? 'rate' : 'rejected', fallback });
+        } catch {
+          reply({ ok: false, reason: 'network', fallback });
+        }
+        return;
+      }
+
+      /**
        * Cross-device sync, the Pro `sync` feature. Enable stores a passphrase and
        * runs a first sync; sync now runs one on demand; disable forgets the
        * passphrase on this device. Each is refused unless the feature is entitled,
@@ -5901,6 +6710,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
           reply({ ok: false, reason: 'disabled', sync: sync.status() });
           return;
         }
+        tally('sync_enable');
         const result = await sync.enable(typeof msg.passphrase === 'string' ? msg.passphrase : '');
         reply({ result, sync: sync.status() });
         return;
@@ -5910,6 +6720,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
           reply({ ok: false, reason: 'disabled', sync: sync.status() });
           return;
         }
+        tally('sync_now');
         const result = await sync.sync();
         reply({ result, sync: sync.status() });
         return;
@@ -5957,6 +6768,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 
       case 'adopt':
         {
+          tally('adopt_run');
           const out = await adopt(msg);
           rebuildMenus();
           reply(out);
@@ -6025,7 +6837,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
               // Re-runs the cold start path in place, which is what a worker
               // restart actually does: reload state, clear whatever rules the
               // previous worker left installed, recompile.
-              ready = boot();
+              ready = timedBoot();
               await ready;
               return {
                 rules: (await backend.current()).length,
@@ -6454,11 +7266,14 @@ Object.assign(globalThis, {
       // binds through this path and asserts on the journal would otherwise be
       // testing a code path the product does not use.
       noteBinding(tabId, sessionId, 'moved by hand', url);
-      engine.markDirty(m.dirty);
+      // Through touched, like every real binding, so groups, the toolbar and
+      // the mark follow exactly as they would in use.
+      touched(m);
       await engine.flush();
       return m;
     },
     seed: seedCookie,
+    regroup: () => regroup(),
     async rules() {
       return backend.current();
     },
@@ -6593,7 +7408,7 @@ Object.assign(globalThis, {
         engine,
         storage,
         async () => {
-          ready = boot();
+          ready = timedBoot();
           await ready;
           return {
             rules: (await backend.current()).length,

@@ -164,6 +164,15 @@ export interface Settings {
    */
   failClosed: boolean;
   /**
+   * Ask which session a site belongs to the first time it is opened from a
+   * fresh tab, before it loads. On by default: the alternative was remembering
+   * to open the panel, pick a session and press sign in, which nobody does
+   * before the page has already loaded as the profile.
+   */
+  askNewSites: boolean;
+  /** Sites answered "no session, remember it": opened normally, never asked. */
+  quiet: string[];
+  /**
    * Cache isolation: force every response a managed tab receives to be
    * uncacheable, so nothing a site stashes in the shared HTTP cache under one
    * session can be read back under another on the same origin.
@@ -189,6 +198,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   telemetryAsked: false,
   cautionAcked: false,
   failClosed: false,
+  askNewSites: true,
+  quiet: [],
   cacheIsolation: false,
 });
 
@@ -225,6 +236,12 @@ export function withDefaults(raw: unknown): Settings {
     // reliability-first default: fall through to the browser jar rather than sign
     // the user out of unrelated sites in a managed tab.
     failClosed: s.failClosed === true,
+    // Absent before the question existed, and absence reads as on: asking is the
+    // behaviour every install should have, and it is one switch to turn off.
+    askNewSites: s.askNewSites !== false,
+    quiet: Array.isArray(s.quiet)
+      ? [...new Set(s.quiet.filter((d): d is string => typeof d === 'string' && d.length > 0))].sort()
+      : [],
     // Absent before cache isolation existed, and absence reads as off: the cache
     // is shared, which costs nothing until a site actively abuses it.
     cacheIsolation: s.cacheIsolation === true,

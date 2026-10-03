@@ -360,8 +360,8 @@ describe('tab groups', () => {
     expect(plans[0]!.color).toBe('green');
   });
 
-  it('leaves a lone tab ungrouped, since a group of one is only a border', () => {
-    expect(planGroups([session('a', 'Work', 'jade')], [binding(1, 'a', 10)])).toEqual([]);
+  it('groups a session with a single tab too', () => {
+    expect(planGroups([session('a', 'Work', 'jade')], [binding(1, 'a', 10)])).toHaveLength(1);
   });
 
   it('ignores bindings with no window and sessions that no longer exist', () => {
